@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<!--
+  원가 모니터링 화면 (Thymeleaf 템플릿)
+
+  [엔터프라이즈 SM 운영 관점 — 이 화면이 필요한 이유]
+  IT 운영 조직은 “서비스 가용성”뿐 아니라 “예산 대비 집행(원가)”을 같은 타임라인에서 봐야 합니다.
+  프로젝트가 초과 집행되면 인력·인프라 투입이 제한되고, 연동/배포 속도가 느려져 <b>간접적으로 장애 위험</b>이 커지기 때문입니다.
+  상단 KPI는 의사결정자가 한눈에 재무 상태를 파악하게 하고, 본부 필터는 대규모 조직에서 책임 범위를 좁히는 데 쓰입니다.
+
+  [면접 포인트 요약]
+  - 상단 숫자(총 예산/집행/잔여)는 서버(Model)에서 계산된 값을 표시합니다.
+  - 본부 필터는 "서버 재요청 없이" 브라우저에서 테이블 행을 숨기는 클라이언트 사이드 필터입니다.
+  - ${@moneyFormat.format(...)} 는 스프링 빈을 템플릿에서 호출하는 문법입니다.
+-->
+<html lang="ko" xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>원가 모니터링 · 백오피스</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet"
+          integrity="sha384-QWTKZyjpPEjISv5WaRU9OFeRpok6YctnYmDr5pNlyT2bRjXh0JMhjY6hW+ALEwIH" crossorigin="anonymous">
+    <style>
+        .navbar-brand { font-weight: 600; letter-spacing: -0.02em; }
+        .stat-card { border-radius: .75rem; border: 1px solid rgba(0,0,0,.06); }
+        .table thead th { font-size: .8rem; text-transform: uppercase; letter-spacing: .04em; color: #6c757d; }
+    </style>
+</head>
+<body class="bg-body-tertiary">
+<!-- [SM] 원가 화면도 동일 내비게이션을 써야 운영자가 컨텍스트 전환 시 헷갈리지 않습니다(단일 백오피스 UX). -->
+<nav class="navbar navbar-expand-lg navbar-dark bg-dark shadow-sm">
+    <div class="container">
+        <a class="navbar-brand" th:href="@{/interface}">보험사 IT · 백오피스</a>
+        <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#mainNav"
+                aria-controls="mainNav" aria-expanded="false" aria-label="Toggle navigation">
+            <span class="navbar-toggler-icon"></span>
+        </button>
+        <div class="collapse navbar-collapse" id="mainNav">
+            <ul class="navbar-nav ms-auto gap-lg-2">
+                <li class="nav-item">
+                    <a class="nav-link" th:href="@{/interface}"
+                       th:classappend="${activeMenu == 'interface'} ? 'active'">인터페이스 관제</a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link" th:href="@{/cost}"
+                       th:classappend="${activeMenu == 'cost'} ? 'active'">원가 모니터링</a>
+                </li>
+            </ul>
+        </div>
+    </div>
+</nav>
+
+<main class="container py-4">
+    <div class="d-flex flex-column flex-md-row align-items-md-end justify-content-between gap-3 mb-4">
+        <div>
+            <h1 class="h3 mb-1 fw-semibold">원가 · 관리회계 모니터링</h1>
+            <p class="text-secondary mb-0 small">본부별 프로젝트 예산과 집행 현황을 한눈에 확인합니다.</p>
+        </div>
+        <!--/*
+          본부 필터는 순수 HTML <select>입니다.
+          변경 이벤트는 아래 <script>에서 처리하며, 서버로 다시 요청하지 않습니다.
+        */-->
+        <div class="w-100 w-md-auto" style="max-width: 16rem;">
+            <label for="departmentFilter" class="form-label small text-secondary mb-1">본부 필터</label>
+            <select id="departmentFilter" class="form-select form-select-sm shadow-sm">
+                <option value="ALL" selected>전체</option>
+                <option value="A본부">A본부</option>
+                <option value="B본부">B본부</option>
+                <option value="C본부">C본부</option>
+                <option value="D본부">D본부</option>
+                <option value="E본부">E본부</option>
+            </select>
+        </div>
+    </div>
+
+    <div class="row g-3 mb-4">
+        <div class="col-md-4">
+            <div class="card stat-card shadow-sm h-100">
+                <div class="card-body">
+                    <div class="text-secondary small fw-medium">총 예산 (표준 원가 합)</div>
+                    <!--/*
+                      @moneyFormat : 스프링에 등록된 빈 이름이 moneyFormat인 컴포넌트의 format()을 호출합니다.
+                      Thymeleaf에서 빈 호출은 화면 포맷팅을 자바 쪽에 모을 때 유용합니다.
+                    */-->
+                    <div class="fs-3 fw-semibold" th:text="${@moneyFormat.format(totalBudget)}">0</div>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-4">
+            <div class="card stat-card shadow-sm h-100">
+                <div class="card-body">
+                    <div class="text-secondary small fw-medium">총 집행 원가</div>
+                    <div class="fs-3 fw-semibold" th:text="${@moneyFormat.format(totalSpent)}">0</div>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-4">
+            <!--/*
+              th:classappend: 잔여 예산이 음수면 카드 테두리에 danger 계열 클래스를 추가합니다.
+              삼항 연산자에서 false 쪽은 빈 문자열('')로 "아무 것도 추가하지 않음"을 표현합니다.
+            */-->
+            <div class="card stat-card shadow-sm h-100"
+                 th:classappend="${remainingBudget < 0} ? ' border-danger border-opacity-50'">
+                <div class="card-body">
+                    <div class="text-secondary small fw-medium">잔여 예산</div>
+                    <div class="fs-3 fw-semibold"
+                         th:classappend="${remainingBudget < 0} ? ' text-danger' : ''"
+                         th:text="${@moneyFormat.format(remainingBudget)}">0</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="card shadow-sm border-0">
+        <div class="card-body p-0">
+            <div class="table-responsive">
+                <!--/* id="costTable": 아래 자바스크립트가 이 테이블의 tbody tr만 골라 필터링합니다. */-->
+                <table class="table table-hover align-middle mb-0" id="costTable">
+                    <thead class="table-light">
+                    <tr>
+                        <th scope="col">본부</th>
+                        <th scope="col">프로젝트명</th>
+                        <th scope="col" class="text-end">표준 원가</th>
+                        <th scope="col" class="text-end">집행 원가</th>
+                        <th scope="col">상태</th>
+                    </tr>
+                    </thead>
+                    <tbody>
+                    <!--/*
+                      th:each="c : ${costs}" : 비용 행을 전부 펼쳐 출력합니다.
+                      th:attr="data-dept=..." : 각 행에 "본부명"을 data 속성으로 심어 JS 필터가 읽게 합니다.
+                      th:classappend : 상태가 '초과'면 Bootstrap의 table-danger로 행 전체를 강조합니다.
+                    */-->
+                    <tr th:each="c : ${costs}"
+                        th:attr="data-dept=${c.departmentName}"
+                        th:classappend="${c.status == '초과'} ? ' table-danger'">
+                        <td th:text="${c.departmentName}">A본부</td>
+                        <td th:text="${c.projectName}">프로젝트-001</td>
+                        <td class="text-end font-monospace" th:text="${@moneyFormat.format(c.standardCost)}">0</td>
+                        <td class="text-end font-monospace" th:text="${@moneyFormat.format(c.currentCost)}">0</td>
+                        <td>
+                            <span th:if="${c.status == '안정'}" class="text-success fw-medium" th:text="${c.status}">안정</span>
+                            <span th:if="${c.status == '초과'}" class="text-danger fw-semibold" th:text="${c.status}">초과</span>
+                        </td>
+                    </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</main>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"
+        integrity="sha384-YvpcrYf0tY3lHB60NNkmXc5s9fDVZLESaAA55NDzOxhy9GkcIdslK1eN7N6jIeHz"
+        crossorigin="anonymous"></script>
+<!--/*
+  클라이언트 사이드 필터링(비동기 아님)
+  - 서버에 다시 요청하지 않고, DOM에서 행(tr)을 숨김/표시만 바꿉니다.
+  - Bootstrap의 d-none(display:none) 클래스를 토글합니다.
+
+  IIFE: (function(){ ... })();
+  - 전역 스코프 오염을 줄이기 위해 즉시 실행 함수로 감쌌습니다.
+*/-->
+<script>
+    (function () {
+        var select = document.getElementById('departmentFilter');
+        // data-dept 속성이 있는 행만 대상으로 삼습니다(헤더 행 제외 효과).
+        var rows = document.querySelectorAll('#costTable tbody tr[data-dept]');
+
+        select.addEventListener('change', function () {
+            var value = select.value;
+            rows.forEach(function (tr) {
+                var dept = tr.getAttribute('data-dept');
+                // 전체(ALL)이거나, 선택한 본부명과 일치하면 표시, 아니면 숨김
+                if (value === 'ALL' || dept === value) {
+                    tr.classList.remove('d-none');
+                } else {
+                    tr.classList.add('d-none');
+                }
+            });
+        });
+    })();
+</script>
+</body>
+</html>

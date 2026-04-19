@@ -1,0 +1,588 @@
+<!DOCTYPE html>
+<!--
+  [엔터프라이즈 SM(서비스 관리) 운영 관점 — 이 화면이 필요한 이유]
+  보험사 IT는 수십~수백 개의 대외·대내 인터페이스가 24시간 동시에 동작합니다. 단순 “목록 조회”만으로는
+  장애 대응·감사 추적·용량 계획을 수행할 수 없습니다. 그래서 본 템플릿은 (1) KPI 카드, (2) 필터/검색,
+  (3) 정렬 가능한 그리드, (4) 전문(페이로드) 상세, (5) 재처리(재시도) UX를 한 화면에 모읍니다.
+  Thymeleaf는 서버에서 HTML을 완성해 내려 초기 데이터를 안전하게 주입하고, 이후 상호작용은 fetch로
+  REST API를 호출합니다(관제 콘솔에서 흔한 하이브리드 렌더링).
+-->
+<html lang="ko" xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>인터페이스 관제 콘솔 · 백오피스</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet"
+          integrity="sha384-QWTKZyjpPEjISv5WaRU9OFeRpok6YctnYmDr5pNlyT2bRjXh0JMhjY6hW+ALEwIH" crossorigin="anonymous">
+    <style>
+        /* [SM UX] 관제 화면은 정보 밀도가 높아 타이포·여백을 통일해야 피로도가 줄어듭니다. */
+        .navbar-brand { font-weight: 600; letter-spacing: -0.02em; }
+        .stat-card { border-radius: .75rem; border: 1px solid rgba(0,0,0,.06); }
+        .table thead th { font-size: .8rem; text-transform: uppercase; letter-spacing: .04em; color: #6c757d; }
+        .sortable-th { cursor: pointer; user-select: none; }
+        .sortable-th:hover { color: #0d6efd; }
+        .if-detail-btn { text-decoration: underline; text-underline-offset: 2px; }
+        #retryOverlay {
+            display: none; position: fixed; inset: 0; z-index: 2000;
+            background: rgba(255,255,255,.72); backdrop-filter: blur(2px);
+            align-items: center; justify-content: center; flex-direction: column; gap: 1rem;
+        }
+        #retryOverlay.show { display: flex; }
+        /* [UX] KPI 카드 클릭으로 상태 필터와 연동 — 운영자가 드롭다운을 찾지 않고도 동일 건만 볼 수 있습니다. */
+        .stat-card--clickable {
+            cursor: pointer;
+            transition: transform .15s ease, box-shadow .2s ease, border-color .2s ease;
+        }
+        .stat-card--clickable:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 .4rem 1.1rem rgba(0, 0, 0, .1) !important;
+        }
+        .stat-card--clickable:focus {
+            outline: 0;
+            box-shadow: 0 0 0 .2rem rgba(13, 110, 253, .22), 0 .4rem 1rem rgba(0, 0, 0, .08) !important;
+        }
+        .stat-card--clickable.stat-card--success:hover {
+            border-color: rgba(25, 135, 84, .45) !important;
+        }
+        .stat-card--clickable.stat-card--fail:hover {
+            border-color: rgba(220, 53, 69, .45) !important;
+        }
+        .stat-card--clickable.stat-card--total:hover {
+            border-color: rgba(13, 110, 253, .35) !important;
+        }
+        /* [UX] 헤더 베이스라인 정렬: 정렬 화살표 유무로 줄 높이가 갈리지 않게 flex + 동일 폭 슬롯으로 통일 */
+        #historyTable thead th {
+            vertical-align: middle;
+        }
+        /* 화면 폭에 맞춤: 가로 스크롤 없이 레이아웃 — 긴 URL은 엔드포인트 열에서만 말줄임 */
+        #historyTable {
+            width: 100%;
+            table-layout: fixed;
+        }
+        #historyTable tbody td {
+            min-width: 0;
+        }
+        #historyTable thead th.endpoint-col,
+        #historyTable tbody td.endpoint-cell {
+            max-width: 250px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        /* 상태·조치: 최소 폭만 차지해 항상 뷰 안에 보이도록(우측 고정 느낌) */
+        #historyTable thead th.col-status,
+        #historyTable thead th.col-action,
+        #historyTable tbody td.col-status,
+        #historyTable tbody td.col-action {
+            width: 1%;
+            white-space: nowrap;
+        }
+        #historyTable thead th .th-inner {
+            display: inline-flex;
+            align-items: center;
+            gap: 0;
+            min-height: 1.35em;
+        }
+        #historyTable thead th.text-end .th-inner {
+            justify-content: flex-end;
+            width: 100%;
+        }
+        #historyTable thead .sort-arrow,
+        #historyTable thead .header-sort-slot {
+            flex-shrink: 0;
+            min-width: .75rem;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            font-size: .65rem;
+            line-height: 1;
+            margin-left: .2rem; /* 글자와 ▲/▼ 사이: Bootstrap ms-1 대신 살짝 좁혀 정돈 */
+        }
+        #historyTable thead .header-sort-slot {
+            visibility: hidden;
+            pointer-events: none;
+        }
+    </style>
+</head>
+<body class="bg-body-tertiary">
+<!--
+  [SM 실무] 내비게이션은 “현재 업무 맥락”을 사용자에게 상시 알려 주어 오조작(다른 메뉴에서 잘못된 조치)을 줄입니다.
+  th:href="@{/경로}" 는 컨텍스트 경로를 반영한 안전한 URL 생성입니다.
+-->
+<nav class="navbar navbar-expand-lg navbar-dark bg-dark shadow-sm">
+    <div class="container">
+        <a class="navbar-brand" th:href="@{/interface}">보험사 IT · 연동 관제</a>
+        <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#mainNav"
+                aria-controls="mainNav" aria-expanded="false" aria-label="Toggle navigation">
+            <span class="navbar-toggler-icon"></span>
+        </button>
+        <div class="collapse navbar-collapse" id="mainNav">
+            <ul class="navbar-nav ms-auto gap-lg-2">
+                <li class="nav-item">
+                    <a class="nav-link" th:href="@{/interface}"
+                       th:classappend="${activeMenu == 'interface'} ? 'active'">인터페이스 관제</a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link" th:href="@{/cost}"
+                       th:classappend="${activeMenu == 'cost'} ? 'active'">원가 모니터링</a>
+                </li>
+            </ul>
+        </div>
+    </div>
+</nav>
+
+<main class="container py-4">
+    <div class="d-flex flex-column flex-md-row align-items-md-end justify-content-between gap-2 mb-3">
+        <div>
+            <h1 class="h3 mb-1 fw-semibold">연동 관제 콘솔</h1>
+            <!-- [SM] 한 줄 설명은 온콜 인수인계 문서의 ‘화면 목적’ 항목과 동일한 역할을 합니다. -->
+            <p class="text-secondary mb-0 small">대외·대내 인터페이스 이력 조회, 메타데이터 등록, 장애 건 재처리 및 전문 확인을 수행합니다.</p>
+        </div>
+        <!-- [SM] 신규 연동은 변경관리와 동기화되어야 하나, 데모에서는 콘솔에서 즉시 ‘카탈로그 등록’을 허용합니다. -->
+        <button type="button" class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#registerModal">
+            신규 인터페이스 등록
+        </button>
+    </div>
+
+    <!--
+      [SM KPI] 건수만 보면 ‘느려짐’을 놓칩니다. 평균 응답(ms)과 TPS(초당 처리량)은 성능·용량 관제의 최소 단위입니다.
+      실서비스에서는 메트릭 파이프라인에서 가져오고, 여기서는 서버 평균 + 클라이언트 TPS 시뮬레이션입니다.
+    -->
+    <div class="row g-3 mb-4">
+        <div class="col-6 col-lg">
+            <!-- [UX] 클릭 시 검색·프로토콜·상태 필터를 모두 초기화해 ‘전체 보기’로 돌아갑니다. -->
+            <div class="card stat-card stat-card--clickable stat-card--total shadow-sm h-100" id="statCardTotal"
+                 role="button" tabindex="0" title="클릭하여 전체 건 보기">
+                <div class="card-body py-3">
+                    <div class="text-secondary small fw-medium">총 연동 건수</div>
+                    <div class="h2 fw-semibold mb-0" th:text="${totalCount}">0</div>
+                </div>
+            </div>
+        </div>
+        <div class="col-6 col-lg">
+            <div class="card stat-card stat-card--clickable stat-card--success shadow-sm h-100 border-success border-opacity-25"
+                 id="statCardSuccess" role="button" tabindex="0" title="클릭하여 정상 건만 보기">
+                <div class="card-body py-3">
+                    <div class="text-secondary small fw-medium">정상 (Success)</div>
+                    <div class="h2 fw-semibold text-success mb-0" th:text="${successCount}">0</div>
+                </div>
+            </div>
+        </div>
+        <div class="col-6 col-lg">
+            <div class="card stat-card stat-card--clickable stat-card--fail shadow-sm h-100 border-danger border-opacity-25"
+                 id="statCardFail" role="button" tabindex="0" title="클릭하여 오류 건만 보기">
+                <div class="card-body py-3">
+                    <div class="text-secondary small fw-medium">오류 (Fail)</div>
+                    <div class="h2 fw-semibold text-danger mb-0" th:text="${failCount}">0</div>
+                </div>
+            </div>
+        </div>
+        <div class="col-6 col-lg">
+            <div class="card stat-card shadow-sm h-100 border-primary border-opacity-25">
+                <div class="card-body py-3">
+                    <div class="text-secondary small fw-medium">평균 응답 속도 (ms)</div>
+                    <div class="h2 fw-semibold text-primary mb-0" th:text="${avgResponseMs}">0</div>
+                </div>
+            </div>
+        </div>
+        <div class="col-6 col-lg">
+            <div class="card stat-card shadow-sm h-100">
+                <div class="card-body py-3">
+                    <div class="text-secondary small fw-medium">실시간 TPS <span class="text-muted fw-normal">(시뮬)</span></div>
+                    <div class="h2 fw-semibold mb-0"><span id="liveTps">—</span></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- [SM] 필터/검색은 대량 이벤트 스트림에서 원인 후보를 좁히는 1차 도구입니다(로그 검색의 앞 단계). -->
+    <div class="card shadow-sm border-0 mb-3">
+        <div class="card-body py-3">
+            <div class="row g-2 align-items-end">
+                <div class="col-md-4">
+                    <label for="searchName" class="form-label small text-secondary mb-1">인터페이스명 검색</label>
+                    <input type="search" id="searchName" class="form-control form-control-sm" placeholder="실시간 필터…" autocomplete="off">
+                </div>
+                <div class="col-md-3 col-6">
+                    <label for="filterProtocol" class="form-label small text-secondary mb-1">프로토콜</label>
+                    <select id="filterProtocol" class="form-select form-select-sm">
+                        <option value="">전체</option>
+                        <option>REST</option>
+                        <option>SOAP</option>
+                        <option>MQ</option>
+                        <option>Batch</option>
+                        <option>SFTP</option>
+                    </select>
+                </div>
+                <div class="col-md-3 col-6">
+                    <label for="filterStatus" class="form-label small text-secondary mb-1">상태</label>
+                    <select id="filterStatus" class="form-select form-select-sm">
+                        <option value="">전체</option>
+                        <option>Success</option>
+                        <option>Fail</option>
+                    </select>
+                </div>
+                <div class="col-md-2">
+                    <button type="button" class="btn btn-outline-secondary btn-sm w-100" id="resetFilters">필터 초기화</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="card shadow-sm border-0">
+        <div class="card-body p-0">
+            <div class="table-responsive">
+                <table class="table table-hover align-middle mb-0 text-nowrap" id="historyTable">
+                    <thead class="table-light">
+                    <tr>
+                        <!-- [SM] 헤더 클릭 정렬은 운영자가 최근 장애 구간을 빠르게 재배열할 때 씁니다. -->
+                        <th scope="col" class="sortable-th" data-sort="id" data-type="number"><span class="th-inner"><span class="th-label">ID</span><span class="sort-arrow text-primary" aria-hidden="true"></span></span></th>
+                        <th scope="col" class="sortable-th" data-sort="ifid" data-type="string"><span class="th-inner"><span class="th-label">인터페이스 ID</span><span class="sort-arrow text-primary" aria-hidden="true"></span></span></th>
+                        <th scope="col" class="sortable-th" data-sort="name" data-type="string"><span class="th-inner"><span class="th-label">인터페이스명</span><span class="sort-arrow text-primary" aria-hidden="true"></span></span></th>
+                        <th scope="col" class="sortable-th" data-sort="protocol" data-type="string"><span class="th-inner"><span class="th-label">프로토콜</span><span class="sort-arrow text-primary" aria-hidden="true"></span></span></th>
+                        <th scope="col"><span class="th-inner"><span class="th-label">담당 부서</span><span class="header-sort-slot" aria-hidden="true"></span></span></th>
+                        <th scope="col" class="endpoint-col"><span class="th-inner"><span class="th-label">엔드포인트</span><span class="header-sort-slot" aria-hidden="true"></span></span></th>
+                        <th scope="col" class="sortable-th text-end" data-sort="rt" data-type="number"><span class="th-inner"><span class="th-label">응답(ms)</span><span class="sort-arrow text-primary" aria-hidden="true"></span></span></th>
+                        <th scope="col"><span class="th-inner"><span class="th-label">대상 시스템</span><span class="header-sort-slot" aria-hidden="true"></span></span></th>
+                        <th scope="col" class="sortable-th" data-sort="exec" data-type="date"><span class="th-inner"><span class="th-label">실행 일시</span><span class="sort-arrow text-primary" aria-hidden="true"></span></span></th>
+                        <th scope="col" class="sortable-th col-status" data-sort="status" data-type="string"><span class="th-inner"><span class="th-label">상태</span><span class="sort-arrow text-primary" aria-hidden="true"></span></span></th>
+                        <th scope="col" class="text-end col-action"><span class="th-inner"><span class="th-label">조치</span><span class="header-sort-slot" aria-hidden="true"></span></span></th>
+                    </tr>
+                    </thead>
+                    <tbody id="historyTableBody">
+                    <tr th:each="h : ${histories}"
+                        th:data-id="${h.id}"
+                        th:data-ifid="${h.interfaceId}"
+                        th:data-name="${h.interfaceName}"
+                        th:data-protocol="${h.communicationType}"
+                        th:data-dept="${h.department}"
+                        th:data-endpoint="${h.endpoint}"
+                        th:data-rt="${h.responseTime}"
+                        th:data-target="${h.targetSystem}"
+                        th:data-exec="${h.executeDate}"
+                        th:data-status="${h.status}">
+                        <td class="text-secondary" th:text="${h.id}">1</td>
+                        <td>
+                            <button type="button" class="btn btn-link btn-sm p-0 font-monospace if-detail-btn text-nowrap"
+                                    th:data-id="${h.id}"
+                                    title="클릭하여 상세 로그 확인"
+                                    th:text="${h.interfaceId}">IF-00001</button>
+                        </td>
+                        <td th:text="${h.interfaceName}">이름</td>
+                        <td><span class="badge rounded-pill text-bg-secondary" th:text="${h.communicationType}">REST</span></td>
+                        <td th:text="${h.department}">부서</td>
+                        <td class="endpoint-cell text-muted small" th:text="${h.endpoint}" th:title="${h.endpoint}">url</td>
+                        <td class="text-end font-monospace small" th:text="${h.responseTime}">0</td>
+                        <td th:text="${h.targetSystem}">금감원</td>
+                        <td th:text="${#temporals.format(h.executeDate, 'yyyy-MM-dd HH:mm')}">2026-01-01 12:00</td>
+                        <td class="col-status">
+                            <span th:if="${h.status == 'Success'}" class="badge text-bg-success">Success</span>
+                            <span th:if="${h.status == 'Fail'}" class="badge text-bg-danger">Fail</span>
+                        </td>
+                        <td class="text-end col-action">
+                            <button type="button" class="btn btn-sm btn-outline-primary retry-btn text-nowrap"
+                                    th:if="${h.status == 'Fail'}"
+                                    th:data-id="${h.id}">재처리</button>
+                            <span th:if="${h.status == 'Success'}" class="text-muted small">—</span>
+                        </td>
+                    </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</main>
+
+<!-- [SM] 등록 모달: 운영자가 코드 배포 없이 메타데이터를 보강할 수 있게 합니다(실무에서는 승인 워크플로 후 반영). -->
+<div class="modal fade" id="registerModal" tabindex="-1" aria-labelledby="registerModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 class="modal-title h5" id="registerModalLabel">신규 인터페이스 등록</h2>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <form id="registerForm" novalidate>
+                    <div class="mb-3">
+                        <label for="regName" class="form-label">인터페이스명</label>
+                        <input type="text" class="form-control" id="regName" required maxlength="128" placeholder="예: 보험금 지급 결과 통지 API">
+                    </div>
+                    <div class="mb-3">
+                        <label for="regProtocol" class="form-label">프로토콜</label>
+                        <select class="form-select" id="regProtocol" required>
+                            <option value="" disabled selected>선택</option>
+                            <option>REST</option>
+                            <option>SOAP</option>
+                            <option>MQ</option>
+                            <option>Batch</option>
+                            <option>SFTP</option>
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label for="regEndpoint" class="form-label">엔드포인트 주소</label>
+                        <input type="text" class="form-control" id="regEndpoint" required maxlength="512"
+                               placeholder="https://... 또는 QUEUE://...">
+                    </div>
+                    <div class="mb-0">
+                        <label for="regDept" class="form-label">담당 부서</label>
+                        <input type="text" class="form-control" id="regDept" required maxlength="64" placeholder="예: 디지털채널개발팀">
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">취소</button>
+                <button type="button" class="btn btn-primary" id="registerSubmit">등록</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- [SM] 전문 모달: L1이 개발팀으로 넘기기 전 ‘증거 패키지’를 화면에서 바로 확보합니다(민감정보 마스킹은 실무 필수). -->
+<div class="modal fade" id="detailModal" tabindex="-1" aria-labelledby="detailModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 class="modal-title h5" id="detailModalLabel">연동 상세 로그</h2>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <p class="small text-secondary mb-3" id="detailSummary"></p>
+                <h3 class="h6">요청 전문 (Mock JSON)</h3>
+                <pre class="bg-body-secondary p-3 rounded small mb-3" id="detailRequest" style="max-height:220px;overflow:auto"></pre>
+                <h3 class="h6">응답 전문 (Mock JSON)</h3>
+                <pre class="bg-body-secondary p-3 rounded small mb-3" id="detailResponse" style="max-height:220px;overflow:auto"></pre>
+                <h3 class="h6">에러 / 스택 상세</h3>
+                <pre class="bg-danger bg-opacity-10 p-3 rounded small mb-0 text-danger" id="detailError" style="max-height:200px;overflow:auto"></pre>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">닫기</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- [SM] 재처리는 외부 시스템과의 실제 I/O를 기다리는 동안 사용자에게 ‘진행 중’을 알려야 중복 클릭·오해가 줄어듭니다. -->
+<div id="retryOverlay" aria-live="polite" aria-busy="true">
+    <div class="spinner-border text-primary" role="status" style="width:3rem;height:3rem;">
+        <span class="visually-hidden">Loading</span>
+    </div>
+    <div class="fw-semibold text-center px-3">타겟 시스템(Endpoint)과 통신을 재시도 중입니다…</div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"
+        integrity="sha384-YvpcrYf0tY3lHB60NNkmXc5s9fDVZLESaAA55NDzOxhy9GkcIdslK1eN7N6jIeHz"
+        crossorigin="anonymous"></script>
+<script th:inline="javascript">
+    /*<![CDATA[*/
+    (function () {
+        // [SM] 컨텍스트 경로가 붙는 배포에서도 API URL이 깨지지 않게 서버가 접두어를 주입합니다.
+        var apiInterfacePrefix = /*[[@{/api/interface/}]]*/ '/api/interface/';
+        var newInterfaceUrl = /*[[@{/api/interface/new}]]*/ '/api/interface/new';
+
+        var tbody = document.getElementById('historyTableBody');
+        var searchInput = document.getElementById('searchName');
+        var filterProtocol = document.getElementById('filterProtocol');
+        var filterStatus = document.getElementById('filterStatus');
+        var resetFilters = document.getElementById('resetFilters');
+        var liveTpsEl = document.getElementById('liveTps');
+        var retryOverlay = document.getElementById('retryOverlay');
+
+        var detailModalEl = document.getElementById('detailModal');
+        var detailModal = detailModalEl ? new bootstrap.Modal(detailModalEl) : null;
+        var registerModalEl = document.getElementById('registerModal');
+        var registerModal = registerModalEl ? bootstrap.Modal.getOrCreateInstance(registerModalEl) : null;
+
+        function rowMatchesFilters(tr) {
+            var q = (searchInput.value || '').trim().toLowerCase();
+            var pname = (tr.getAttribute('data-name') || '').toLowerCase();
+            if (q && pname.indexOf(q) === -1) return false;
+            var fp = filterProtocol.value;
+            if (fp && tr.getAttribute('data-protocol') !== fp) return false;
+            var fs = filterStatus.value;
+            if (fs && tr.getAttribute('data-status') !== fs) return false;
+            return true;
+        }
+
+        function applyFilters() {
+            tbody.querySelectorAll('tr').forEach(function (tr) {
+                tr.classList.toggle('d-none', !rowMatchesFilters(tr));
+            });
+        }
+
+        /** [UX] KPI ‘총 건수’ 카드·필터 초기화 버튼과 동일 동작 — 전체 그리드로 돌아갑니다. */
+        function resetAllFilters() {
+            searchInput.value = '';
+            filterProtocol.value = '';
+            filterStatus.value = '';
+            applyFilters();
+        }
+
+        function bindStatCard(el, handler) {
+            if (!el) return;
+            el.addEventListener('click', handler);
+            el.addEventListener('keydown', function (e) {
+                if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    handler();
+                }
+            });
+        }
+
+        bindStatCard(document.getElementById('statCardTotal'), resetAllFilters);
+        bindStatCard(document.getElementById('statCardSuccess'), function () {
+            filterStatus.value = 'Success';
+            applyFilters();
+        });
+        bindStatCard(document.getElementById('statCardFail'), function () {
+            filterStatus.value = 'Fail';
+            applyFilters();
+        });
+
+        searchInput.addEventListener('input', applyFilters);
+        filterProtocol.addEventListener('change', applyFilters);
+        filterStatus.addEventListener('change', applyFilters);
+        resetFilters.addEventListener('click', resetAllFilters);
+
+        // [SM] TPS는 순간 처리량 지표로, 알람 임계·스케일아웃 판단에 쓰입니다(여기서는 교육용 난수 시뮬레이션).
+        function tickTps() {
+            liveTpsEl.textContent = (Math.random() * 49 + 1).toFixed(1);
+        }
+        tickTps();
+        setInterval(tickTps, 1500);
+
+        var sortState = { key: 'exec', dir: 'desc' };
+
+        /** [UX] 정렬 활성 컬럼만 ▲/▼ 표시 — 다른 헤더의 표식은 제거해 직관적으로 유지합니다. */
+        function updateSortIndicator() {
+            document.querySelectorAll('#historyTable thead .sort-arrow').forEach(function (el) {
+                el.textContent = '';
+            });
+            document.querySelectorAll('#historyTable thead [data-sort]').forEach(function (th) {
+                th.removeAttribute('aria-sort');
+            });
+            var th = document.querySelector('#historyTable thead [data-sort="' + sortState.key + '"]');
+            if (!th) return;
+            var ind = th.querySelector('.sort-arrow');
+            if (ind) {
+                ind.textContent = sortState.dir === 'asc' ? '▲' : '▼';
+            }
+            th.setAttribute('aria-sort', sortState.dir === 'asc' ? 'ascending' : 'descending');
+        }
+
+        function cellValue(tr, key) {
+            if (key === 'id') return parseFloat(tr.getAttribute('data-id')) || 0;
+            if (key === 'ifid') return tr.getAttribute('data-ifid') || '';
+            if (key === 'name') return tr.getAttribute('data-name') || '';
+            if (key === 'protocol') return tr.getAttribute('data-protocol') || '';
+            if (key === 'rt') return parseFloat(tr.getAttribute('data-rt')) || 0;
+            if (key === 'exec') return Date.parse(tr.getAttribute('data-exec')) || 0;
+            if (key === 'status') return tr.getAttribute('data-status') || '';
+            return '';
+        }
+
+        function sortRows(key, type) {
+            var rows = Array.from(tbody.querySelectorAll('tr'));
+            if (sortState.key === key) {
+                sortState.dir = sortState.dir === 'asc' ? 'desc' : 'asc';
+            } else {
+                sortState.key = key;
+                sortState.dir = type === 'string' ? 'asc' : 'desc';
+            }
+            var mul = sortState.dir === 'asc' ? 1 : -1;
+            rows.sort(function (a, b) {
+                var va = cellValue(a, key);
+                var vb = cellValue(b, key);
+                if (type === 'number' || type === 'date') {
+                    return (va - vb) * mul;
+                }
+                return String(va).localeCompare(String(vb), 'ko') * mul;
+            });
+            rows.forEach(function (r) { tbody.appendChild(r); });
+            applyFilters();
+            updateSortIndicator();
+        }
+
+        document.querySelectorAll('#historyTable thead [data-sort]').forEach(function (th) {
+            th.addEventListener('click', function () {
+                sortRows(th.getAttribute('data-sort'), th.getAttribute('data-type') || 'string');
+            });
+        });
+
+        updateSortIndicator();
+
+        document.querySelectorAll('.if-detail-btn').forEach(function (btn) {
+            btn.addEventListener('click', function () {
+                var id = btn.getAttribute('data-id');
+                fetch(apiInterfacePrefix + id + '/detail', { headers: { 'Accept': 'application/json' } })
+                    .then(function (res) {
+                        if (!res.ok) throw new Error('detail failed');
+                        return res.json();
+                    })
+                    .then(function (d) {
+                        document.getElementById('detailSummary').textContent =
+                            '[' + d.interfaceId + '] ' + d.interfaceName + ' · ' + d.endpoint + ' · 상태: ' + d.status;
+                        document.getElementById('detailRequest').textContent = d.requestPayloadJson || '';
+                        document.getElementById('detailResponse').textContent = d.responsePayloadJson || '';
+                        document.getElementById('detailError').textContent = d.errorLogDetail || '';
+                        detailModal.show();
+                    })
+                    .catch(function () { alert('상세 로그를 불러오지 못했습니다.'); });
+            });
+        });
+
+        document.querySelectorAll('.retry-btn').forEach(function (btn) {
+            btn.addEventListener('click', function () {
+                var id = btn.getAttribute('data-id');
+                retryOverlay.classList.add('show');
+                setTimeout(function () {
+                    fetch(apiInterfacePrefix + id + '/retry', { method: 'POST', headers: { 'Accept': 'text/plain' } })
+                        .then(function (res) {
+                            if (!res.ok) throw new Error('retry failed');
+                            return res.text();
+                        })
+                        .then(function (body) {
+                            retryOverlay.classList.remove('show');
+                            if (body === 'ok') location.reload();
+                        })
+                        .catch(function () {
+                            retryOverlay.classList.remove('show');
+                            alert('재처리 요청에 실패했습니다.');
+                        });
+                }, 2000);
+            });
+        });
+
+        document.getElementById('registerSubmit').addEventListener('click', function () {
+            var name = document.getElementById('regName').value.trim();
+            var protocol = document.getElementById('regProtocol').value;
+            var endpoint = document.getElementById('regEndpoint').value.trim();
+            var dept = document.getElementById('regDept').value.trim();
+            if (!name || !protocol || !endpoint || !dept) {
+                alert('필수 항목을 모두 입력해 주세요.');
+                return;
+            }
+            fetch(newInterfaceUrl, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+                body: JSON.stringify({
+                    interfaceName: name,
+                    protocol: protocol,
+                    endpoint: endpoint,
+                    department: dept
+                })
+            })
+                .then(function (res) {
+                    if (!res.ok) throw new Error('register failed');
+                    return res.json();
+                })
+                .then(function () {
+                    registerModal.hide();
+                    location.reload();
+                })
+                .catch(function () { alert('등록에 실패했습니다. 입력값을 확인해 주세요.'); });
+        });
+    })();
+    /*]]>*/
+</script>
+</body>
+</html>
