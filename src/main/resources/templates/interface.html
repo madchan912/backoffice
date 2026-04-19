@@ -1,5 +1,8 @@
 <!DOCTYPE html>
 <!--
+  롤백 힌트(인터페이스명 모달·담당부서 말줄임): 아래 검색 "nameModal" / "name-open-btn" / "dept-cell" / "name-col" / "interface-name"
+  및 <style>의 name·dept 블록을 제거하고, 인터페이스명 td·담당부서 td를 단순 th:text 한 줄로 되돌리면 됩니다.
+
   [엔터프라이즈 SM(서비스 관리) 운영 관점 — 이 화면이 필요한 이유]
   보험사 IT는 수십~수백 개의 대외·대내 인터페이스가 24시간 동시에 동작합니다. 단순 “목록 조회”만으로는
   장애 대응·감사 추적·용량 계획을 수행할 수 없습니다. 그래서 본 템플릿은 (1) KPI 카드, (2) 필터/검색,
@@ -54,28 +57,116 @@
         #historyTable thead th {
             vertical-align: middle;
         }
-        /* 화면 폭에 맞춤: 가로 스크롤 없이 레이아웃 — 긴 URL은 엔드포인트 열에서만 말줄임 */
+        /* 내용 기준 자연 폭 + 최소 뷰포트 폭; 넘치면 부모 .table-responsive에서 가로 스크롤 */
         #historyTable {
-            width: 100%;
-            table-layout: fixed;
+            width: max-content;
+            min-width: 100%;
+            /* 조치 열 폭 — 상태 열의 right 오프셋과 동일해야 틀 고정이 맞물림 */
+            --sticky-action-col-width: 5.75rem;
         }
-        #historyTable tbody td {
-            min-width: 0;
+        /* 오른쪽 틀 고정: 스크롤 영역과의 경계는 상태 열 왼쪽만 은은하게(조치 열 오른쪽 검은 선 제거) */
+        #historyTable thead th.col-sticky-status,
+        #historyTable tbody td.col-sticky-status {
+            position: sticky;
+            right: var(--sticky-action-col-width);
+            z-index: 3;
+            text-align: center;
+            background-color: var(--bs-card-bg, var(--bs-body-bg));
+            background-clip: padding-box;
+            border-left: 1px solid rgba(0, 0, 0, 0.06);
+            box-shadow: -4px 0 10px rgba(0, 0, 0, 0.04);
         }
+        #historyTable thead th.col-sticky-action,
+        #historyTable tbody td.col-sticky-action {
+            position: sticky;
+            right: 0;
+            z-index: 4;
+            min-width: var(--sticky-action-col-width);
+            background-color: var(--bs-card-bg, var(--bs-body-bg));
+            background-clip: padding-box;
+            border-left: 0;
+            box-shadow: none;
+            border-right: none !important;
+            border-inline-end: none !important;
+        }
+        #historyTable thead th.col-sticky-status,
+        #historyTable thead th.col-sticky-action {
+            z-index: 6;
+            background-color: var(--bs-table-bg, var(--bs-secondary-bg));
+        }
+        .table-hover > tbody > tr:hover > td.col-sticky-status,
+        .table-hover > tbody > tr:hover > td.col-sticky-action {
+            background-color: var(--bs-table-hover-bg, rgba(0, 0, 0, 0.04));
+        }
+        /* 모든 셀에서 줄바꿈 금지 — 뱃지·버튼·라벨이 겹치거나 세로로 꺾이지 않도록 */
+        #historyTable th,
+        #historyTable td {
+            white-space: nowrap !important;
+        }
+        /* 엔드포인트: 목록에서는 짧게만 — 호버(title)로 미리보기, 클릭 시 전용 모달에서 전체·복사 */
         #historyTable thead th.endpoint-col,
         #historyTable tbody td.endpoint-cell {
-            max-width: 250px;
+            width: 12rem;
+            max-width: 12rem;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap !important;
+        }
+        #historyTable tbody td.endpoint-cell {
+            padding: 0;
+        }
+        .endpoint-open-btn {
+            cursor: pointer;
+            border-radius: 0;
+            min-width: 0;
+            max-width: 100%;
+            overflow: hidden;
+            text-align: start;
+        }
+        .endpoint-open-btn .endpoint-truncate {
+            display: block;
             overflow: hidden;
             text-overflow: ellipsis;
             white-space: nowrap;
         }
-        /* 상태·조치: 최소 폭만 차지해 항상 뷰 안에 보이도록(우측 고정 느낌) */
-        #historyTable thead th.col-status,
-        #historyTable thead th.col-action,
-        #historyTable tbody td.col-status,
-        #historyTable tbody td.col-action {
-            width: 1%;
+        /* 인터페이스명: 엔드포인트와 동일 UX(호버·클릭 모달·복사) — 목록 폭 절약 */
+        #historyTable thead th.name-col,
+        #historyTable tbody td.name-cell {
+            width: 11rem;
+            max-width: 11rem;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap !important;
+        }
+        #historyTable tbody td.name-cell {
+            padding: 0;
+        }
+        .name-open-btn {
+            cursor: pointer;
+            border-radius: 0;
+            min-width: 0;
+            max-width: 100%;
+            overflow: hidden;
+            text-align: start;
+        }
+        .name-open-btn .name-truncate {
+            display: block;
+            overflow: hidden;
+            text-overflow: ellipsis;
             white-space: nowrap;
+        }
+        /* 담당 부서: 말줄임 + title 툴팁만(모달 없음) */
+        #historyTable thead th.dept-col,
+        #historyTable tbody td.dept-cell {
+            width: 7rem;
+            max-width: 7rem;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap !important;
+        }
+        #historyTable thead th.col-sticky-status .th-inner {
+            justify-content: center;
+            width: 100%;
         }
         #historyTable thead th .th-inner {
             display: inline-flex;
@@ -238,15 +329,15 @@
                         <!-- [SM] 헤더 클릭 정렬은 운영자가 최근 장애 구간을 빠르게 재배열할 때 씁니다. -->
                         <th scope="col" class="sortable-th" data-sort="id" data-type="number"><span class="th-inner"><span class="th-label">ID</span><span class="sort-arrow text-primary" aria-hidden="true"></span></span></th>
                         <th scope="col" class="sortable-th" data-sort="ifid" data-type="string"><span class="th-inner"><span class="th-label">인터페이스 ID</span><span class="sort-arrow text-primary" aria-hidden="true"></span></span></th>
-                        <th scope="col" class="sortable-th" data-sort="name" data-type="string"><span class="th-inner"><span class="th-label">인터페이스명</span><span class="sort-arrow text-primary" aria-hidden="true"></span></span></th>
+                        <th scope="col" class="sortable-th name-col" data-sort="name" data-type="string" title="셀 호버로 전체 미리보기 · 클릭 시 전체 보기·복사"><span class="th-inner"><span class="th-label">인터페이스명</span><span class="sort-arrow text-primary" aria-hidden="true"></span></span></th>
                         <th scope="col" class="sortable-th" data-sort="protocol" data-type="string"><span class="th-inner"><span class="th-label">프로토콜</span><span class="sort-arrow text-primary" aria-hidden="true"></span></span></th>
-                        <th scope="col"><span class="th-inner"><span class="th-label">담당 부서</span><span class="header-sort-slot" aria-hidden="true"></span></span></th>
-                        <th scope="col" class="endpoint-col"><span class="th-inner"><span class="th-label">엔드포인트</span><span class="header-sort-slot" aria-hidden="true"></span></span></th>
+                        <th scope="col" class="dept-col" title="긴 부서명은 호버로 전체 확인"><span class="th-inner"><span class="th-label">담당 부서</span><span class="header-sort-slot" aria-hidden="true"></span></span></th>
+                        <th scope="col" class="endpoint-col" title="셀에 마우스를 올리면 주소 미리보기 · 클릭하면 전체 보기 및 복사"><span class="th-inner"><span class="th-label">엔드포인트</span><span class="header-sort-slot" aria-hidden="true"></span></span></th>
                         <th scope="col" class="sortable-th text-end" data-sort="rt" data-type="number"><span class="th-inner"><span class="th-label">응답(ms)</span><span class="sort-arrow text-primary" aria-hidden="true"></span></span></th>
                         <th scope="col"><span class="th-inner"><span class="th-label">대상 시스템</span><span class="header-sort-slot" aria-hidden="true"></span></span></th>
                         <th scope="col" class="sortable-th" data-sort="exec" data-type="date"><span class="th-inner"><span class="th-label">실행 일시</span><span class="sort-arrow text-primary" aria-hidden="true"></span></span></th>
-                        <th scope="col" class="sortable-th col-status" data-sort="status" data-type="string"><span class="th-inner"><span class="th-label">상태</span><span class="sort-arrow text-primary" aria-hidden="true"></span></span></th>
-                        <th scope="col" class="text-end col-action"><span class="th-inner"><span class="th-label">조치</span><span class="header-sort-slot" aria-hidden="true"></span></span></th>
+                        <th scope="col" class="sortable-th col-sticky-status text-center" data-sort="status" data-type="string"><span class="th-inner"><span class="th-label">상태</span><span class="sort-arrow text-primary" aria-hidden="true"></span></span></th>
+                        <th scope="col" class="text-end col-sticky-action"><span class="th-inner"><span class="th-label">조치</span><span class="header-sort-slot" aria-hidden="true"></span></span></th>
                     </tr>
                     </thead>
                     <tbody id="historyTableBody">
@@ -268,18 +359,30 @@
                                     title="클릭하여 상세 로그 확인"
                                     th:text="${h.interfaceId}">IF-00001</button>
                         </td>
-                        <td th:text="${h.interfaceName}">이름</td>
+                        <td class="name-cell p-0">
+                            <button type="button" class="btn btn-link name-open-btn text-body text-decoration-none w-100 small rounded-0"
+                                    th:data-interface-name="${h.interfaceName}"
+                                    th:title="${h.interfaceName}">
+                                <span class="name-truncate" th:text="${h.interfaceName}">이름</span>
+                            </button>
+                        </td>
                         <td><span class="badge rounded-pill text-bg-secondary" th:text="${h.communicationType}">REST</span></td>
-                        <td th:text="${h.department}">부서</td>
-                        <td class="endpoint-cell text-muted small" th:text="${h.endpoint}" th:title="${h.endpoint}">url</td>
+                        <td class="dept-cell text-muted small" th:text="${h.department}" th:title="${h.department}">부서</td>
+                        <td class="endpoint-cell text-muted small">
+                            <button type="button" class="btn btn-link endpoint-open-btn text-muted text-decoration-none w-100 small rounded-0"
+                                    th:data-endpoint="${h.endpoint}"
+                                    th:title="${h.endpoint}">
+                                <span class="endpoint-truncate font-monospace" th:text="${h.endpoint}">url</span>
+                            </button>
+                        </td>
                         <td class="text-end font-monospace small" th:text="${h.responseTime}">0</td>
                         <td th:text="${h.targetSystem}">금감원</td>
                         <td th:text="${#temporals.format(h.executeDate, 'yyyy-MM-dd HH:mm')}">2026-01-01 12:00</td>
-                        <td class="col-status">
+                        <td class="col-sticky-status text-center">
                             <span th:if="${h.status == 'Success'}" class="badge text-bg-success">Success</span>
                             <span th:if="${h.status == 'Fail'}" class="badge text-bg-danger">Fail</span>
                         </td>
-                        <td class="text-end col-action">
+                        <td class="text-end col-sticky-action">
                             <button type="button" class="btn btn-sm btn-outline-primary retry-btn text-nowrap"
                                     th:if="${h.status == 'Fail'}"
                                     th:data-id="${h.id}">재처리</button>
@@ -361,6 +464,54 @@
     </div>
 </div>
 
+<!--
+  [SM] 엔드포인트 전용 모달: 목록은 말줄임으로 가독성을 유지하고, 감사·티켓에 붙일 정확한 문자열은 여기서만 확정·복사합니다.
+-->
+<div class="modal fade" id="endpointModal" tabindex="-1" aria-labelledby="endpointModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 class="modal-title h5" id="endpointModalLabel">엔드포인트 전체</h2>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <p class="small text-secondary mb-2">호버로 미리본 주소와 동일합니다. 아래에서 복사하거나 직접 선택해 사용하세요.</p>
+                <pre id="endpointModalText" class="bg-body-secondary p-3 rounded small mb-3 font-monospace"
+                     style="white-space: pre-wrap; word-break: break-all; max-height: 40vh; overflow: auto;"></pre>
+                <div id="endpointCopyFeedback" class="small text-success mb-2 d-none" role="status" aria-live="polite">클립보드에 복사했습니다.</div>
+                <button type="button" class="btn btn-primary" id="endpointCopyBtn">클립보드에 복사</button>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">닫기</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!--
+  [SM] 인터페이스명 모달: 엔드포인트와 동일하게 티켓·메일에 붙일 전체 명을 복사할 수 있게 합니다.
+-->
+<div class="modal fade" id="nameModal" tabindex="-1" aria-labelledby="nameModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 class="modal-title h5" id="nameModalLabel">인터페이스명 전체</h2>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <p class="small text-secondary mb-2">목록에서는 말줄임으로 표시됩니다. 아래에서 복사하거나 직접 선택해 사용하세요.</p>
+                <pre id="nameModalText" class="bg-body-secondary p-3 rounded small mb-3"
+                     style="white-space: pre-wrap; word-break: break-word; max-height: 40vh; overflow: auto;"></pre>
+                <div id="nameCopyFeedback" class="small text-success mb-2 d-none" role="status" aria-live="polite">클립보드에 복사했습니다.</div>
+                <button type="button" class="btn btn-primary" id="nameCopyBtn">클립보드에 복사</button>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">닫기</button>
+            </div>
+        </div>
+    </div>
+</div>
+
 <!-- [SM] 재처리는 외부 시스템과의 실제 I/O를 기다리는 동안 사용자에게 ‘진행 중’을 알려야 중복 클릭·오해가 줄어듭니다. -->
 <div id="retryOverlay" aria-live="polite" aria-busy="true">
     <div class="spinner-border text-primary" role="status" style="width:3rem;height:3rem;">
@@ -391,6 +542,104 @@
         var detailModal = detailModalEl ? new bootstrap.Modal(detailModalEl) : null;
         var registerModalEl = document.getElementById('registerModal');
         var registerModal = registerModalEl ? bootstrap.Modal.getOrCreateInstance(registerModalEl) : null;
+
+        var endpointModalEl = document.getElementById('endpointModal');
+        var endpointModal = endpointModalEl ? new bootstrap.Modal(endpointModalEl) : null;
+        var endpointModalText = document.getElementById('endpointModalText');
+        var endpointCopyBtn = document.getElementById('endpointCopyBtn');
+        var endpointCopyFeedback = document.getElementById('endpointCopyFeedback');
+
+        var nameModalEl = document.getElementById('nameModal');
+        var nameModal = nameModalEl ? new bootstrap.Modal(nameModalEl) : null;
+        var nameModalText = document.getElementById('nameModalText');
+        var nameCopyBtn = document.getElementById('nameCopyBtn');
+        var nameCopyFeedback = document.getElementById('nameCopyFeedback');
+
+        function showCopyFeedback(feedbackEl) {
+            if (!feedbackEl) return;
+            feedbackEl.classList.remove('d-none');
+            setTimeout(function () {
+                feedbackEl.classList.add('d-none');
+            }, 2200);
+        }
+
+        function copyTextToClipboard(text, feedbackEl) {
+            if (!text) return;
+            function fallbackCopy() {
+                var ta = document.createElement('textarea');
+                ta.value = text;
+                ta.setAttribute('readonly', '');
+                ta.style.position = 'fixed';
+                ta.style.left = '-9999px';
+                document.body.appendChild(ta);
+                ta.focus();
+                ta.select();
+                try {
+                    document.execCommand('copy');
+                    showCopyFeedback(feedbackEl);
+                } catch (e1) {
+                    alert('복사에 실패했습니다. 아래 텍스트를 직접 선택해 주세요.');
+                }
+                document.body.removeChild(ta);
+            }
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+                navigator.clipboard.writeText(text).then(function () {
+                    showCopyFeedback(feedbackEl);
+                }).catch(fallbackCopy);
+            } else {
+                fallbackCopy();
+            }
+        }
+
+        document.querySelectorAll('.endpoint-open-btn').forEach(function (btn) {
+            btn.addEventListener('click', function () {
+                var v = btn.getAttribute('data-endpoint') || '';
+                if (endpointModalText) {
+                    endpointModalText.textContent = v;
+                }
+                if (endpointModalEl) {
+                    endpointModalEl.setAttribute('data-clip-text', v);
+                }
+                if (endpointCopyFeedback) {
+                    endpointCopyFeedback.classList.add('d-none');
+                }
+                if (endpointModal) {
+                    endpointModal.show();
+                }
+            });
+        });
+
+        if (endpointCopyBtn) {
+            endpointCopyBtn.addEventListener('click', function () {
+                var text = (endpointModalEl && endpointModalEl.getAttribute('data-clip-text')) || (endpointModalText && endpointModalText.textContent) || '';
+                copyTextToClipboard(text, endpointCopyFeedback);
+            });
+        }
+
+        document.querySelectorAll('.name-open-btn').forEach(function (btn) {
+            btn.addEventListener('click', function () {
+                var v = btn.getAttribute('data-interface-name') || '';
+                if (nameModalText) {
+                    nameModalText.textContent = v;
+                }
+                if (nameModalEl) {
+                    nameModalEl.setAttribute('data-clip-text', v);
+                }
+                if (nameCopyFeedback) {
+                    nameCopyFeedback.classList.add('d-none');
+                }
+                if (nameModal) {
+                    nameModal.show();
+                }
+            });
+        });
+
+        if (nameCopyBtn) {
+            nameCopyBtn.addEventListener('click', function () {
+                var text = (nameModalEl && nameModalEl.getAttribute('data-clip-text')) || (nameModalText && nameModalText.textContent) || '';
+                copyTextToClipboard(text, nameCopyFeedback);
+            });
+        }
 
         function rowMatchesFilters(tr) {
             var q = (searchInput.value || '').trim().toLowerCase();
