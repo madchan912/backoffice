@@ -30,6 +30,31 @@
         .sortable-th:hover { color: #0d6efd; }
         .sort-ind { display: inline-block; min-width: .5rem; font-size: .65rem; margin-left: .15rem; }
         .chart-wrap { position: relative; height: 280px; max-width: 720px; margin: 0 auto; }
+        /*
+         * [UX] 특정 본부 필터 시 차트를 접고, 전체 복귀 시에만 부드럽게 펼칩니다.
+         * display:none으로 즉시 숨기고, 복귀 시 display 복원 후 opacity만 전환해 “다시 나타남”을 표현합니다.
+         */
+        #deptChartSection {
+            transition: opacity 0.4s ease;
+        }
+        #deptChartSection.chart-hidden {
+            display: none !important;
+        }
+        #deptChartSection.chart-reveal {
+            opacity: 0;
+        }
+        #deptChartSection.chart-visible {
+            opacity: 1;
+        }
+        .cost-stack-track {
+            display: flex;
+            height: 1rem;
+            border-radius: .375rem;
+            overflow: hidden;
+            box-shadow: inset 0 0 0 1px rgba(0,0,0,.06);
+        }
+        .cost-stack-seg { transition: width 0.35s ease; min-width: 2px; }
+        .cost-legend-dot { width: .55rem; height: .55rem; border-radius: 50%; flex-shrink: 0; margin-top: .35rem; }
     </style>
 </head>
 <body class="bg-body-tertiary">
@@ -109,15 +134,17 @@
         </div>
     </div>
 
-    <!-- [시각화] 본부별 소진율 = Σ집행/Σ표준 — 경영진이 어느 조직에 예산 압박이 큰지 즉시 비교합니다. -->
-    <div class="card shadow-sm border-0 mb-4">
-        <div class="card-header bg-white py-3 border-0">
-            <h2 class="h6 mb-0 fw-semibold">5개 본부별 예산 소진율 (%)</h2>
-            <p class="small text-secondary mb-0 mt-1">각 본부 소속 프로젝트의 표준 원가·집행 원가 합계를 기준으로 산출했습니다.</p>
-        </div>
-        <div class="card-body">
-            <div class="chart-wrap">
-                <canvas id="deptBurnChart" aria-label="본부별 예산 소진율 막대 차트"></canvas>
+    <!-- [시각화] 본부별 소진율 = Σ집행/Σ표준 — 전체 본부 보기에서만 노출(필터 시 숨김으로 테이블 집중). -->
+    <div id="deptChartSection" class="chart-visible">
+        <div class="card shadow-sm border-0 mb-4">
+            <div class="card-header bg-white py-3 border-0">
+                <h2 class="h6 mb-0 fw-semibold">5개 본부별 예산 소진율 (%)</h2>
+                <p class="small text-secondary mb-0 mt-1">각 본부 소속 프로젝트의 표준 원가·집행 원가 합계를 기준으로 산출했습니다.</p>
+            </div>
+            <div class="card-body">
+                <div class="chart-wrap">
+                    <canvas id="deptBurnChart" aria-label="본부별 예산 소진율 막대 차트"></canvas>
+                </div>
             </div>
         </div>
     </div>
@@ -214,6 +241,48 @@
                 </div>
                 <h3 class="h6 border-bottom pb-2 mb-2">상세 분석 리포트</h3>
                 <div class="bg-body-secondary rounded p-3 small" id="costDrillReport" style="white-space: pre-wrap;"></div>
+                <!--
+                  [관리회계·금융 IT] 비용 구성(Cost Breakdown)은 단순 합계가 아니라 “어디로 흘러갔는가”를 설명합니다.
+                  내부대체비용(Internal transfer / charge-out)은 그룹 공통센터·IT 인프라가 CO에 배분한 금액으로,
+                  면접에서 Activity-based costing·TPM(Transfer Pricing Management) 논의로 연결됩니다. 본 블록은 데모용 랜덤 비율입니다.
+                -->
+                <div id="costBreakdownSection" class="mt-3 pt-3 border-top border-secondary-subtle">
+                    <h4 class="h6 fw-semibold mb-1">비용 구성 비율 <span class="text-secondary fw-normal small">(Cost Breakdown · 시뮬레이션)</span></h4>
+                    <p class="small text-secondary mb-3 mb-md-2">
+                        직접비·인건비·<strong>공통비 및 내부대체비용</strong>을 합산 100%로 분해한 뷰입니다. 내부대체는 현금 유출 없이 관리회계상 비용이 이전된 금액입니다.
+                    </p>
+                    <div class="cost-stack-track mb-3" role="img" aria-label="비용 구성 스택 바">
+                        <div id="costSegDirect" class="cost-stack-seg bg-primary bg-opacity-75" style="width:0%"></div>
+                        <div id="costSegLabor" class="cost-stack-seg bg-success bg-opacity-75" style="width:0%"></div>
+                        <div id="costSegOverhead" class="cost-stack-seg bg-warning text-dark" style="width:0%"></div>
+                    </div>
+                    <ul class="list-unstyled small mb-0">
+                        <li class="d-flex gap-2 mb-2">
+                            <span class="cost-legend-dot bg-primary bg-opacity-75"></span>
+                            <div>
+                                <span class="fw-medium">직접비 (Direct Costs)</span>
+                                <span class="text-secondary ms-1" id="costPctDirect">0%</span>
+                                <div class="text-secondary" style="font-size:.8rem;">외주·라이선스·전용 장비 등 프로젝트에 직접 귀속</div>
+                            </div>
+                        </li>
+                        <li class="d-flex gap-2 mb-2">
+                            <span class="cost-legend-dot bg-success bg-opacity-75"></span>
+                            <div>
+                                <span class="fw-medium">인건비 (Labor Costs)</span>
+                                <span class="text-secondary ms-1" id="costPctLabor">0%</span>
+                                <div class="text-secondary" style="font-size:.8rem;">투입 M/M 기준 내부 인건비·상여 배부</div>
+                            </div>
+                        </li>
+                        <li class="d-flex gap-2 mb-0">
+                            <span class="cost-legend-dot bg-warning"></span>
+                            <div>
+                                <span class="fw-medium">공통비 및 내부대체비용 (Overhead &amp; Internal Transfer)</span>
+                                <span class="text-secondary ms-1" id="costPctOverhead">0%</span>
+                                <div class="text-secondary" style="font-size:.8rem;">데이터센터·네트워크·보안운영 등 공통 IT에서 배분 / 내부대체 정산</div>
+                            </div>
+                        </li>
+                    </ul>
+                </div>
             </div>
             <div class="modal-footer">
                 <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">닫기</button>
@@ -286,9 +355,32 @@
 
         var select = document.getElementById('departmentFilter');
         var tbody = document.getElementById('costTableBody');
+        var chartSection = document.getElementById('deptChartSection');
         var rows = function () {
             return tbody.querySelectorAll('tr[data-dept]');
         };
+
+        /**
+         * 특정 본부만 볼 때는 전사 비교 차트를 숨겨 테이블에 시선을 고정시킵니다(display:none).
+         * 전체 복귀 시에는 차트 DOM을 다시 보이게 한 뒤 opacity 전환으로 부드럽게 등장시킵니다.
+         */
+        function setChartSectionForFilter(deptValue) {
+            if (!chartSection) return;
+            if (deptValue === 'ALL') {
+                chartSection.classList.remove('chart-hidden');
+                chartSection.classList.remove('chart-visible');
+                chartSection.classList.add('chart-reveal');
+                requestAnimationFrame(function () {
+                    requestAnimationFrame(function () {
+                        chartSection.classList.remove('chart-reveal');
+                        chartSection.classList.add('chart-visible');
+                    });
+                });
+            } else {
+                chartSection.classList.add('chart-hidden');
+                chartSection.classList.remove('chart-reveal', 'chart-visible');
+            }
+        }
 
         function applyDeptFilter() {
             var value = select.value;
@@ -296,6 +388,7 @@
                 var dept = tr.getAttribute('data-dept');
                 tr.classList.toggle('d-none', value !== 'ALL' && dept !== value);
             });
+            setChartSectionForFilter(value);
         }
 
         select.addEventListener('change', applyDeptFilter);
@@ -357,6 +450,30 @@
             return Number(n).toLocaleString('ko-KR') + '원';
         }
 
+        /**
+         * [관리회계] 집행 원가를 직접비·인건비·(공통비+내부대체비용)으로만 분해한 비율(합계 100%).
+         * 공통·내부대체 비중을 먼저 뽑고 잔여를 직접비/인건비로 쪼개면 항상 합계 100%·최소 비중이 보장됩니다.
+         */
+        function randomCostBreakdownPct() {
+            var overhead = 12 + Math.floor(Math.random() * 29);
+            var remain = 100 - overhead;
+            var dMin = 15;
+            var dMax = remain - 15;
+            var direct = dMin + Math.floor(Math.random() * (dMax - dMin + 1));
+            var labor = remain - direct;
+            return { direct: direct, labor: labor, overhead: overhead };
+        }
+
+        function applyCostBreakdownToModal() {
+            var br = randomCostBreakdownPct();
+            document.getElementById('costPctDirect').textContent = br.direct + '%';
+            document.getElementById('costPctLabor').textContent = br.labor + '%';
+            document.getElementById('costPctOverhead').textContent = br.overhead + '%';
+            document.getElementById('costSegDirect').style.width = br.direct + '%';
+            document.getElementById('costSegLabor').style.width = br.labor + '%';
+            document.getElementById('costSegOverhead').style.width = br.overhead + '%';
+        }
+
         var drillModalEl = document.getElementById('costDrillModal');
         var drillModal = drillModalEl ? new bootstrap.Modal(drillModalEl) : null;
 
@@ -402,6 +519,7 @@
                         ? '· 차기 월 롤링 예산 재산정 또는 비용요소 재배분 검토\n· WBS 기준 실적 추적 회의 소질'
                         : '· 현 수준 유지 및 분기별 벤치마크 점검');
                 document.getElementById('costDrillReport').textContent = report;
+                applyCostBreakdownToModal();
                 if (drillModal) drillModal.show();
             });
         });
