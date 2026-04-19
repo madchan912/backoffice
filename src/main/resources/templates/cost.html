@@ -55,6 +55,49 @@
         }
         .cost-stack-seg { transition: width 0.35s ease; min-width: 2px; }
         .cost-legend-dot { width: .55rem; height: .55rem; border-radius: 50%; flex-shrink: 0; margin-top: .35rem; }
+        /* [UX] 본부·상태 필터를 한 줄(또는 균등 줄바꿈)로 정렬해 의사결정자가 조건을 빠르게 조합할 수 있게 합니다. */
+        .cost-filter-toolbar {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: center;
+            align-items: flex-end;
+            gap: 1rem 1.5rem;
+            max-width: 42rem;
+            margin-left: auto;
+            margin-right: auto;
+        }
+        .cost-filter-field {
+            flex: 1 1 12rem;
+            min-width: 10rem;
+            max-width: 18rem;
+        }
+        .cost-filter-field .form-label { margin-bottom: 0.35rem; }
+        .cost-table-card-header { gap: 0.5rem 1rem; }
+        /*
+         * 모달 금액·집행률: font-monospace는 한글·쉼표와 섞일 때 획 두께가 들쭉날쭉해 보일 수 있어
+         * OS 기본 고딕 + tabular-nums로 숫자 폭만 맞추고, 서브픽셀 안티앨리어싱으로 작은 배지 글자를 매끈하게 합니다.
+         */
+        .cost-modal-kpi-value {
+            font-family: system-ui, "Segoe UI", Roboto, "Malgun Gothic", "Apple SD Gothic Neo",
+                "Noto Sans KR", "Helvetica Neue", sans-serif;
+            font-variant-numeric: tabular-nums;
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
+            text-rendering: optimizeLegibility;
+            letter-spacing: -0.02em;
+        }
+        .cost-exec-rate-badge {
+            font-family: system-ui, "Segoe UI", Roboto, "Malgun Gothic", "Apple SD Gothic Neo",
+                "Noto Sans KR", sans-serif;
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
+            text-rendering: optimizeLegibility;
+            font-size: 0.8125rem;
+            line-height: 1.4;
+        }
+        .cost-exec-rate-badge .cost-exec-rate-value {
+            font-variant-numeric: tabular-nums;
+        }
     </style>
 </head>
 <body class="bg-body-tertiary">
@@ -119,17 +162,25 @@
         </div>
     </div>
 
-    <!-- [UX] 본부 선택을 중앙에 두어 “조직 단위 분석”이 화면의 주 행위임을 시각적으로 강조합니다. -->
-    <div class="row justify-content-center mb-4">
-        <div class="col-12 col-md-6 col-lg-4">
-            <label for="departmentFilter" class="form-label small text-secondary mb-1 text-center d-block">본부 선택 (필터)</label>
-            <select id="departmentFilter" class="form-select form-select shadow-sm">
+    <!-- [UX] 본부 AND 상태 복합 필터 — 차트는 “전체 본부”일 때만 노출(아래 applyFilters). -->
+    <div class="cost-filter-toolbar mb-4">
+        <div class="cost-filter-field">
+            <label for="departmentFilter" class="form-label small text-secondary d-block text-center text-md-start">본부 선택</label>
+            <select id="departmentFilter" class="form-select shadow-sm" aria-label="본부 필터">
                 <option value="ALL" selected>전체 본부</option>
                 <option value="A본부">A본부</option>
                 <option value="B본부">B본부</option>
                 <option value="C본부">C본부</option>
                 <option value="D본부">D본부</option>
                 <option value="E본부">E본부</option>
+            </select>
+        </div>
+        <div class="cost-filter-field">
+            <label for="statusFilter" class="form-label small text-secondary d-block text-center text-md-start">상태 선택</label>
+            <select id="statusFilter" class="form-select shadow-sm" aria-label="상태 필터">
+                <option value="ALL" selected>전체 상태</option>
+                <option value="초과">초과</option>
+                <option value="안정">안정</option>
             </select>
         </div>
     </div>
@@ -150,8 +201,9 @@
     </div>
 
     <div class="card shadow-sm border-0">
-        <div class="card-header bg-white py-3 border-bottom">
+        <div class="card-header bg-white py-3 border-bottom d-flex flex-wrap justify-content-between align-items-center cost-table-card-header">
             <h2 class="h6 mb-0 fw-semibold">프로젝트 원가 명세</h2>
+            <span id="resultCount" class="badge rounded-pill text-bg-secondary fw-normal px-3 py-2">총 0건</span>
         </div>
         <div class="card-body p-0">
             <div class="table-responsive">
@@ -223,19 +275,26 @@
                     <div class="col-md-4">
                         <div class="border rounded p-3 bg-body-secondary h-100">
                             <div class="small text-secondary">표준 원가 (예산)</div>
-                            <div class="fs-5 fw-semibold font-monospace" id="costDrillStandard">0</div>
+                            <div class="fs-5 fw-semibold cost-modal-kpi-value" id="costDrillStandard">0</div>
                         </div>
                     </div>
                     <div class="col-md-4">
                         <div class="border rounded p-3 bg-body-secondary h-100">
                             <div class="small text-secondary">집행 원가 (실적)</div>
-                            <div class="fs-5 fw-semibold font-monospace" id="costDrillCurrent">0</div>
+                            <div class="fs-5 fw-semibold cost-modal-kpi-value" id="costDrillCurrent">0</div>
+                            <!-- [관리회계] 예산 집행률 = 집행/표준×100 — 표준(분모)이 0이면 비율은 정의되지 않습니다. -->
+                            <div class="mt-2 pt-2 border-top border-secondary-subtle">
+                                <span class="badge rounded-pill fw-normal px-2 py-2 bg-white border text-secondary cost-exec-rate-badge" id="costDrillExecRateBadge">
+                                    <span class="text-muted">예산 집행률</span>
+                                    <span id="costDrillExecRate" class="fw-semibold cost-exec-rate-value ms-1">—</span>
+                                </span>
+                            </div>
                         </div>
                     </div>
                     <div class="col-md-4">
                         <div class="border rounded p-3 h-100" id="costDrillDiffBox">
                             <div class="small text-secondary">차이 (집행−표준)</div>
-                            <div class="fs-5 fw-semibold font-monospace" id="costDrillDiff">0</div>
+                            <div class="fs-5 fw-semibold cost-modal-kpi-value" id="costDrillDiff">0</div>
                         </div>
                     </div>
                 </div>
@@ -307,42 +366,91 @@
             return Math.min(160, Math.ceil(m / 10) * 10 + 10);
         })();
 
+        /** [관리회계] 100% = 표준(예산) 대비 집행이 꽉 찬 시점 — 막대가 선을 넘으면 초과 소진 구간으로 읽습니다. */
+        var budgetThreshold100 = chartLabels.map(function () {
+            return 100;
+        });
+
+        /** 툴팁·축 표기용: 값 뒤에 %를 붙여 "87.5%"처럼 한눈에 들어오게 합니다. */
+        function formatTooltipPercent(value) {
+            var n = Number(value);
+            if (Number.isNaN(n)) return String(value) + '%';
+            var rounded = Math.round(n * 10) / 10;
+            var s = Math.abs(rounded - Math.round(rounded)) < 0.001 ? String(Math.round(rounded)) : rounded.toFixed(1);
+            return s + '%';
+        }
+
         var ctx = document.getElementById('deptBurnChart');
         if (ctx && typeof Chart !== 'undefined') {
             new Chart(ctx, {
                 type: 'bar',
                 data: {
                     labels: chartLabels,
-                    datasets: [{
-                        label: '예산 소진율 (%)',
-                        data: chartData,
-                        backgroundColor: [
-                            'rgba(13, 110, 253, 0.55)',
-                            'rgba(25, 135, 84, 0.5)',
-                            'rgba(111, 66, 193, 0.5)',
-                            'rgba(253, 126, 20, 0.55)',
-                            'rgba(220, 53, 69, 0.45)'
-                        ],
-                        borderColor: 'rgba(0,0,0,0.06)',
-                        borderWidth: 1,
-                        borderRadius: 4
-                    }]
+                    datasets: [
+                        {
+                            type: 'bar',
+                            label: '예산 소진율 (%)',
+                            order: 0,
+                            data: chartData,
+                            backgroundColor: [
+                                'rgba(13, 110, 253, 0.55)',
+                                'rgba(25, 135, 84, 0.5)',
+                                'rgba(111, 66, 193, 0.5)',
+                                'rgba(253, 126, 20, 0.55)',
+                                'rgba(220, 53, 69, 0.45)'
+                            ],
+                            borderColor: 'rgba(0,0,0,0.06)',
+                            borderWidth: 1,
+                            borderRadius: 4
+                        },
+                        {
+                            type: 'line',
+                            label: '100% 예산 기준선',
+                            order: 1,
+                            data: budgetThreshold100,
+                            borderColor: 'rgba(255, 99, 132, 1)',
+                            borderDash: [5, 5],
+                            borderWidth: 2,
+                            fill: false,
+                            pointRadius: 0,
+                            pointHoverRadius: 0,
+                            tension: 0,
+                            yAxisID: 'y'
+                        }
+                    ]
                 },
                 options: {
                     responsive: true,
                     maintainAspectRatio: false,
+                    interaction: { mode: 'index', intersect: false },
                     plugins: {
-                        legend: { display: false },
+                        legend: {
+                            display: true,
+                            position: 'bottom',
+                            labels: {
+                                boxWidth: 14,
+                                padding: 16,
+                                usePointStyle: true,
+                                filter: function (legendItem) {
+                                    return legendItem.datasetIndex !== 1;
+                                }
+                            }
+                        },
                         tooltip: {
+                            filter: function (tooltipItem) {
+                                return tooltipItem.datasetIndex !== 1;
+                            },
                             callbacks: {
                                 label: function (ctx) {
-                                    return ' 소진율: ' + ctx.raw + '%';
+                                    var y = ctx.parsed.y;
+                                    return ' 소진율: ' + formatTooltipPercent(y);
                                 }
                             }
                         }
                     },
                     scales: {
                         y: {
+                            id: 'y',
                             beginAtZero: true,
                             title: { display: true, text: '소진율 (%)' },
                             suggestedMax: yAxisMax
@@ -353,7 +461,8 @@
             });
         }
 
-        var select = document.getElementById('departmentFilter');
+        var departmentSelect = document.getElementById('departmentFilter');
+        var statusSelect = document.getElementById('statusFilter');
         var tbody = document.getElementById('costTableBody');
         var chartSection = document.getElementById('deptChartSection');
         var rows = function () {
@@ -382,16 +491,35 @@
             }
         }
 
-        function applyDeptFilter() {
-            var value = select.value;
+        /**
+         * 본부·상태 AND 필터: 두 조건을 모두 통과한 행만 표시합니다.
+         * 차트 표시 여부는 본부가 “전체”일 때만(기존 UX 유지).
+         */
+        function applyFilters() {
+            var deptValue = departmentSelect.value;
+            var statusValue = statusSelect.value;
             rows().forEach(function (tr) {
                 var dept = tr.getAttribute('data-dept');
-                tr.classList.toggle('d-none', value !== 'ALL' && dept !== value);
+                var st = tr.getAttribute('data-status');
+                var deptOk = deptValue === 'ALL' || dept === deptValue;
+                var statusOk = statusValue === 'ALL' || st === statusValue;
+                tr.classList.toggle('d-none', !(deptOk && statusOk));
             });
-            setChartSectionForFilter(value);
+            setChartSectionForFilter(deptValue);
+
+            /** Bootstrap d-none ≒ display:none — 숨겨지지 않은 데이터 행만 집계합니다. */
+            var visibleCount = Array.from(rows()).filter(function (tr) {
+                return !tr.classList.contains('d-none');
+            }).length;
+            var resultEl = document.getElementById('resultCount');
+            if (resultEl) {
+                resultEl.textContent = '총 ' + visibleCount + '건';
+            }
         }
 
-        select.addEventListener('change', applyDeptFilter);
+        departmentSelect.addEventListener('change', applyFilters);
+        statusSelect.addEventListener('change', applyFilters);
+        applyFilters();
 
         var sortState = { key: 'project', dir: 'asc' };
 
@@ -451,6 +579,39 @@
         }
 
         /**
+         * 예산 집행률(%) = (집행 원가 / 표준 원가) × 100, 소수 첫째 자리.
+         * 분모 0은 관리회계에서 CO 미배정·데이터 결함으로 처리하고 UI에는 표시하지 않습니다.
+         */
+        function formatBudgetExecRatePct(standard, current) {
+            var s = Number(standard);
+            if (!s || s <= 0) return null;
+            var pct = (Number(current) / s) * 100;
+            return (Math.round(pct * 10) / 10).toFixed(1);
+        }
+
+        function applyBudgetExecRateToModal(standard, current) {
+            var rateStr = formatBudgetExecRatePct(standard, current);
+            var rateEl = document.getElementById('costDrillExecRate');
+            var badgeEl = document.getElementById('costDrillExecRateBadge');
+            if (!rateEl || !badgeEl) return;
+            rateEl.classList.remove('text-danger', 'text-success', 'text-dark', 'text-muted');
+            badgeEl.classList.remove('border-danger', 'border-warning');
+            if (rateStr === null) {
+                rateEl.textContent = '—';
+                rateEl.classList.add('text-muted', 'fw-semibold');
+                return;
+            }
+            var pctNum = parseFloat(rateStr, 10);
+            rateEl.textContent = rateStr + '%';
+            rateEl.classList.add('fw-semibold', 'text-muted');
+            if (pctNum > 100) {
+                rateEl.classList.remove('text-muted');
+                rateEl.classList.add('text-danger');
+                badgeEl.classList.add('border-danger');
+            }
+        }
+
+        /**
          * [관리회계] 집행 원가를 직접비·인건비·(공통비+내부대체비용)으로만 분해한 비율(합계 100%).
          * 공통·내부대체 비중을 먼저 뽑고 잔여를 직접비/인건비로 쪼개면 항상 합계 100%·최소 비중이 보장됩니다.
          */
@@ -491,6 +652,7 @@
                     '[' + dept + '] · ' + project + ' · 상태: ' + st;
                 document.getElementById('costDrillStandard').textContent = formatWon(std);
                 document.getElementById('costDrillCurrent').textContent = formatWon(cur);
+                applyBudgetExecRateToModal(std, cur);
                 var diffEl = document.getElementById('costDrillDiff');
                 diffEl.textContent = formatWon(diff);
                 diffEl.classList.remove('text-danger', 'text-success');
