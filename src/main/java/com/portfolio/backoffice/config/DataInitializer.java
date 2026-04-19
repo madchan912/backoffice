@@ -103,6 +103,28 @@ public class DataInitializer {
     /** 원가 데이터의 본부 이름 후보(5개)입니다. */
     private static final String[] DEPARTMENTS = {"A본부", "B본부", "C본부", "D본부", "E본부"};
 
+    /**
+     * [관리회계] 집행이 표준(예산)을 초과한 경우 흔히 보고되는 사유 후보입니다.
+     * 실무에서는 ERP·그룹웨어 전표의 비고·WBS 비용요소와 연동됩니다.
+     */
+    private static final String[] COST_OVER_REASONS = {
+        "인건비 단가 상승",
+        "공통비 배분 증가",
+        "외주 인력 추가 투입",
+        "클라우드 이용료 인상",
+        "전산 개발 공수 증가",
+        "긴급 장애 대응 인력 투입",
+        "제휴사 인증 범위 확대로 외부 검증 비용 증가"
+    };
+
+    /** [관리회계] 예산 범위 내·절감형 집행에 대한 설명 후보입니다. */
+    private static final String[] COST_STABLE_REASONS = {
+        "예산 내 정상 집행",
+        "절감 활동으로 집행 페이스 조절",
+        "초기 단계로 집행이 분산되어 표준 대비 여유",
+        "내부 인력 전환으로 외주비 절감"
+    };
+
     /** 랜덤 금액의 최솟값(원 단위, 예: 100만). */
     private static final long COST_MIN = 1_000_000L;
 
@@ -170,6 +192,10 @@ public class DataInitializer {
      * <p><b>금액과 상태</b><br>
      * 표준 원가와 집행 원가를 각각 랜덤으로 만든 뒤,
      * 집행이 표준을 넘으면 {@code "초과"}, 아니면 {@code "안정"}으로 비즈니스 규칙을 단순 구현했습니다.
+     *
+     * <p><b>사유({@code costReason})</b><br>
+     * [관리회계] 상태와 사유를 일치시켜 두면 대시보드·드릴다운 리포트에서 “숫자 뒤의 스토리”를 재현할 수 있습니다.
+     * 초과 건에는 비용 발생 원인을, 안정 건에는 통제 정상·절감 narrative를 부여합니다.
      */
     private List<ProjectCost> buildProjectCosts() {
         ThreadLocalRandom r = ThreadLocalRandom.current();
@@ -178,6 +204,10 @@ public class DataInitializer {
             long standard = randomCost(r);
             long current = randomCost(r);
             String status = current > standard ? "초과" : "안정";
+            String reason =
+                    "초과".equals(status)
+                            ? COST_OVER_REASONS[r.nextInt(COST_OVER_REASONS.length)]
+                            : COST_STABLE_REASONS[r.nextInt(COST_STABLE_REASONS.length)];
             list.add(
                     ProjectCost.builder()
                             .departmentName(DEPARTMENTS[i % DEPARTMENTS.length])
@@ -185,6 +215,7 @@ public class DataInitializer {
                             .standardCost(standard)
                             .currentCost(current)
                             .status(status)
+                            .costReason(reason)
                             .build());
         }
         return list;

@@ -1,32 +1,38 @@
 <!DOCTYPE html>
 <!--
-  원가 모니터링 화면 (Thymeleaf 템플릿)
+  원가 · 관리회계 모니터링 (Thymeleaf)
 
-  [엔터프라이즈 SM 운영 관점 — 이 화면이 필요한 이유]
-  IT 운영 조직은 “서비스 가용성”뿐 아니라 “예산 대비 집행(원가)”을 같은 타임라인에서 봐야 합니다.
-  프로젝트가 초과 집행되면 인력·인프라 투입이 제한되고, 연동/배포 속도가 느려져 <b>간접적으로 장애 위험</b>이 커지기 때문입니다.
-  상단 KPI는 의사결정자가 한눈에 재무 상태를 파악하게 하고, 본부 필터는 대규모 조직에서 책임 범위를 좁히는 데 쓰입니다.
+  [금융권 관리회계 대시보드 관점]
+  경영진은 “전사 합계”만으로는 리스크를 판단하지 않습니다. 본부별 소진율(차트)·프로젝트 단위 집행(그리드)·
+  초과 사유(코멘터리)를 같은 화면에 두어야 예산 재배정·통제 조치를 논의할 수 있습니다. 본 화면은
+  서버 집계(KPI·차트 데이터) + 클라이언트 필터/정렬(반응 속도)의 전형적인 하이브리드 패턴입니다.
 
-  [면접 포인트 요약]
-  - 상단 숫자(총 예산/집행/잔여)는 서버(Model)에서 계산된 값을 표시합니다.
-  - 본부 필터는 "서버 재요청 없이" 브라우저에서 테이블 행을 숨기는 클라이언트 사이드 필터입니다.
-  - ${@moneyFormat.format(...)} 는 스프링 빈을 템플릿에서 호출하는 문법입니다.
+  롤백: Chart.js·모달·정렬 스크립트 블록을 제거하고 단순 테이블만 남기면 이전 형태로 복원 가능합니다.
 -->
 <html lang="ko" xmlns:th="http://www.thymeleaf.org">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>원가 모니터링 · 백오피스</title>
+    <title>원가 · 관리회계 대시보드 · 백오피스</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet"
           integrity="sha384-QWTKZyjpPEjISv5WaRU9OFeRpok6YctnYmDr5pNlyT2bRjXh0JMhjY6hW+ALEwIH" crossorigin="anonymous">
     <style>
         .navbar-brand { font-weight: 600; letter-spacing: -0.02em; }
         .stat-card { border-radius: .75rem; border: 1px solid rgba(0,0,0,.06); }
-        .table thead th { font-size: .8rem; text-transform: uppercase; letter-spacing: .04em; color: #6c757d; }
+        #costTable { width: 100%; table-layout: auto; }
+        #costTable thead th {
+            font-size: .8rem;
+            letter-spacing: .03em;
+            color: #6c757d;
+            vertical-align: middle;
+        }
+        .sortable-th { cursor: pointer; user-select: none; white-space: nowrap; }
+        .sortable-th:hover { color: #0d6efd; }
+        .sort-ind { display: inline-block; min-width: .5rem; font-size: .65rem; margin-left: .15rem; }
+        .chart-wrap { position: relative; height: 280px; max-width: 720px; margin: 0 auto; }
     </style>
 </head>
 <body class="bg-body-tertiary">
-<!-- [SM] 원가 화면도 동일 내비게이션을 써야 운영자가 컨텍스트 전환 시 헷갈리지 않습니다(단일 백오피스 UX). -->
 <nav class="navbar navbar-expand-lg navbar-dark bg-dark shadow-sm">
     <div class="container">
         <a class="navbar-brand" th:href="@{/interface}">보험사 IT · 백오피스</a>
@@ -50,19 +56,50 @@
 </nav>
 
 <main class="container py-4">
-    <div class="d-flex flex-column flex-md-row align-items-md-end justify-content-between gap-3 mb-4">
-        <div>
-            <h1 class="h3 mb-1 fw-semibold">원가 · 관리회계 모니터링</h1>
-            <p class="text-secondary mb-0 small">본부별 프로젝트 예산과 집행 현황을 한눈에 확인합니다.</p>
+    <div class="mb-4">
+        <h1 class="h3 mb-1 fw-semibold">원가 · 관리회계 대시보드</h1>
+        <p class="text-secondary mb-0 small">
+            전사 예산·집행 요약, 본부별 예산 소진율, 프로젝트 단위 드릴다운으로 경영 의사결정을 지원합니다.
+        </p>
+    </div>
+
+    <!-- [관리회계 KPI] 손익·현금흐름 보고 전 단계로서 “약속된 자원(표준)” 대비 “실제 소모(집행)”를 가시화합니다. -->
+    <div class="row g-3 mb-4">
+        <div class="col-md-4">
+            <div class="card stat-card shadow-sm h-100">
+                <div class="card-body">
+                    <div class="text-secondary small fw-medium">총 예산 (표준 원가 Σ)</div>
+                    <div class="fs-3 fw-semibold" th:text="${@moneyFormat.format(totalBudget)}">0</div>
+                </div>
+            </div>
         </div>
-        <!--/*
-          본부 필터는 순수 HTML <select>입니다.
-          변경 이벤트는 아래 <script>에서 처리하며, 서버로 다시 요청하지 않습니다.
-        */-->
-        <div class="w-100 w-md-auto" style="max-width: 16rem;">
-            <label for="departmentFilter" class="form-label small text-secondary mb-1">본부 필터</label>
-            <select id="departmentFilter" class="form-select form-select-sm shadow-sm">
-                <option value="ALL" selected>전체</option>
+        <div class="col-md-4">
+            <div class="card stat-card shadow-sm h-100">
+                <div class="card-body">
+                    <div class="text-secondary small fw-medium">총 집행 원가 Σ</div>
+                    <div class="fs-3 fw-semibold" th:text="${@moneyFormat.format(totalSpent)}">0</div>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-4">
+            <div class="card stat-card shadow-sm h-100"
+                 th:classappend="${remainingBudget < 0} ? ' border-danger border-opacity-50'">
+                <div class="card-body">
+                    <div class="text-secondary small fw-medium">잔여 예산 (표준−집행)</div>
+                    <div class="fs-3 fw-semibold"
+                         th:classappend="${remainingBudget < 0} ? ' text-danger' : ''"
+                         th:text="${@moneyFormat.format(remainingBudget)}">0</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- [UX] 본부 선택을 중앙에 두어 “조직 단위 분석”이 화면의 주 행위임을 시각적으로 강조합니다. -->
+    <div class="row justify-content-center mb-4">
+        <div class="col-12 col-md-6 col-lg-4">
+            <label for="departmentFilter" class="form-label small text-secondary mb-1 text-center d-block">본부 선택 (필터)</label>
+            <select id="departmentFilter" class="form-select form-select shadow-sm">
+                <option value="ALL" selected>전체 본부</option>
                 <option value="A본부">A본부</option>
                 <option value="B본부">B본부</option>
                 <option value="C본부">C본부</option>
@@ -72,75 +109,71 @@
         </div>
     </div>
 
-    <div class="row g-3 mb-4">
-        <div class="col-md-4">
-            <div class="card stat-card shadow-sm h-100">
-                <div class="card-body">
-                    <div class="text-secondary small fw-medium">총 예산 (표준 원가 합)</div>
-                    <!--/*
-                      @moneyFormat : 스프링에 등록된 빈 이름이 moneyFormat인 컴포넌트의 format()을 호출합니다.
-                      Thymeleaf에서 빈 호출은 화면 포맷팅을 자바 쪽에 모을 때 유용합니다.
-                    */-->
-                    <div class="fs-3 fw-semibold" th:text="${@moneyFormat.format(totalBudget)}">0</div>
-                </div>
-            </div>
+    <!-- [시각화] 본부별 소진율 = Σ집행/Σ표준 — 경영진이 어느 조직에 예산 압박이 큰지 즉시 비교합니다. -->
+    <div class="card shadow-sm border-0 mb-4">
+        <div class="card-header bg-white py-3 border-0">
+            <h2 class="h6 mb-0 fw-semibold">5개 본부별 예산 소진율 (%)</h2>
+            <p class="small text-secondary mb-0 mt-1">각 본부 소속 프로젝트의 표준 원가·집행 원가 합계를 기준으로 산출했습니다.</p>
         </div>
-        <div class="col-md-4">
-            <div class="card stat-card shadow-sm h-100">
-                <div class="card-body">
-                    <div class="text-secondary small fw-medium">총 집행 원가</div>
-                    <div class="fs-3 fw-semibold" th:text="${@moneyFormat.format(totalSpent)}">0</div>
-                </div>
-            </div>
-        </div>
-        <div class="col-md-4">
-            <!--/*
-              th:classappend: 잔여 예산이 음수면 카드 테두리에 danger 계열 클래스를 추가합니다.
-              삼항 연산자에서 false 쪽은 빈 문자열('')로 "아무 것도 추가하지 않음"을 표현합니다.
-            */-->
-            <div class="card stat-card shadow-sm h-100"
-                 th:classappend="${remainingBudget < 0} ? ' border-danger border-opacity-50'">
-                <div class="card-body">
-                    <div class="text-secondary small fw-medium">잔여 예산</div>
-                    <div class="fs-3 fw-semibold"
-                         th:classappend="${remainingBudget < 0} ? ' text-danger' : ''"
-                         th:text="${@moneyFormat.format(remainingBudget)}">0</div>
-                </div>
+        <div class="card-body">
+            <div class="chart-wrap">
+                <canvas id="deptBurnChart" aria-label="본부별 예산 소진율 막대 차트"></canvas>
             </div>
         </div>
     </div>
 
     <div class="card shadow-sm border-0">
+        <div class="card-header bg-white py-3 border-bottom">
+            <h2 class="h6 mb-0 fw-semibold">프로젝트 원가 명세</h2>
+        </div>
         <div class="card-body p-0">
             <div class="table-responsive">
-                <!--/* id="costTable": 아래 자바스크립트가 이 테이블의 tbody tr만 골라 필터링합니다. */-->
-                <table class="table table-hover align-middle mb-0" id="costTable">
+                <table class="table table-hover align-middle mb-0 text-nowrap" id="costTable">
                     <thead class="table-light">
                     <tr>
-                        <th scope="col">본부</th>
-                        <th scope="col">프로젝트명</th>
-                        <th scope="col" class="text-end">표준 원가</th>
-                        <th scope="col" class="text-end">집행 원가</th>
-                        <th scope="col">상태</th>
+                        <th scope="col" class="sortable-th" data-sort="dept" data-type="string">본부<span class="sort-ind text-primary" aria-hidden="true"></span></th>
+                        <th scope="col" class="sortable-th" data-sort="project" data-type="string">프로젝트명<span class="sort-ind text-primary" aria-hidden="true"></span></th>
+                        <th scope="col" class="sortable-th text-end" data-sort="standard" data-type="number">표준 원가<span class="sort-ind text-primary" aria-hidden="true"></span></th>
+                        <th scope="col" class="sortable-th text-end" data-sort="current" data-type="number">집행 원가<span class="sort-ind text-primary" aria-hidden="true"></span></th>
+                        <th scope="col" class="sortable-th text-end" data-sort="diff" data-type="number">차이<span class="sort-ind text-primary" aria-hidden="true"></span></th>
+                        <th scope="col" class="sortable-th" data-sort="status" data-type="string">상태<span class="sort-ind text-primary" aria-hidden="true"></span></th>
+                        <th scope="col">사유 (관리회계)</th>
                     </tr>
                     </thead>
-                    <tbody>
-                    <!--/*
-                      th:each="c : ${costs}" : 비용 행을 전부 펼쳐 출력합니다.
-                      th:attr="data-dept=..." : 각 행에 "본부명"을 data 속성으로 심어 JS 필터가 읽게 합니다.
-                      th:classappend : 상태가 '초과'면 Bootstrap의 table-danger로 행 전체를 강조합니다.
-                    */-->
+                    <tbody id="costTableBody">
                     <tr th:each="c : ${costs}"
-                        th:attr="data-dept=${c.departmentName}"
-                        th:classappend="${c.status == '초과'} ? ' table-danger'">
+                        th:attr="data-dept=${c.departmentName},
+                                  data-project=${c.projectName},
+                                  data-standard=${c.standardCost},
+                                  data-current=${c.currentCost},
+                                  data-diff=${c.currentCost - c.standardCost},
+                                  data-status=${c.status}">
                         <td th:text="${c.departmentName}">A본부</td>
-                        <td th:text="${c.projectName}">프로젝트-001</td>
+                        <td>
+                            <button type="button"
+                                    class="btn btn-link p-0 text-start cost-drill-btn fw-medium"
+                                    th:data-dept="${c.departmentName}"
+                                    th:data-project="${c.projectName}"
+                                    th:data-standard="${c.standardCost}"
+                                    th:data-current="${c.currentCost}"
+                                    th:data-status="${c.status}"
+                                    th:data-reason="${c.costReason}"
+                                    th:text="${c.projectName}">프로젝트</button>
+                        </td>
                         <td class="text-end font-monospace" th:text="${@moneyFormat.format(c.standardCost)}">0</td>
-                        <td class="text-end font-monospace" th:text="${@moneyFormat.format(c.currentCost)}">0</td>
+                        <td class="text-end font-monospace"
+                            th:classappend="${c.status == '초과'} ? ' text-danger fw-semibold' : ''"
+                            th:text="${@moneyFormat.format(c.currentCost)}">0</td>
+                        <td class="text-end font-monospace"
+                            th:classappend="${c.currentCost - c.standardCost > 0} ? ' text-danger' : (${c.currentCost - c.standardCost < 0} ? ' text-success' : '')"
+                            th:text="${@moneyFormat.format(c.currentCost - c.standardCost)}">0</td>
                         <td>
                             <span th:if="${c.status == '안정'}" class="text-success fw-medium" th:text="${c.status}">안정</span>
                             <span th:if="${c.status == '초과'}" class="text-danger fw-semibold" th:text="${c.status}">초과</span>
                         </td>
+                        <td class="small"
+                            th:classappend="${c.status == '초과'} ? ' text-danger' : ' text-secondary'"
+                            th:text="${c.costReason}">사유</td>
                     </tr>
                     </tbody>
                 </table>
@@ -149,36 +182,231 @@
     </div>
 </main>
 
+<!-- [Drill-down] 프로젝트 단위로 숫자·사유를 묶어 제시 — 이사회·예산委 자료의 최소 단위입니다. -->
+<div class="modal fade" id="costDrillModal" tabindex="-1" aria-labelledby="costDrillModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered modal-lg modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 class="modal-title h5" id="costDrillModalLabel">프로젝트 원가 상세 분석</h2>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <p class="text-secondary small mb-3" id="costDrillSubtitle"></p>
+                <div class="row g-3 mb-4">
+                    <div class="col-md-4">
+                        <div class="border rounded p-3 bg-body-secondary h-100">
+                            <div class="small text-secondary">표준 원가 (예산)</div>
+                            <div class="fs-5 fw-semibold font-monospace" id="costDrillStandard">0</div>
+                        </div>
+                    </div>
+                    <div class="col-md-4">
+                        <div class="border rounded p-3 bg-body-secondary h-100">
+                            <div class="small text-secondary">집행 원가 (실적)</div>
+                            <div class="fs-5 fw-semibold font-monospace" id="costDrillCurrent">0</div>
+                        </div>
+                    </div>
+                    <div class="col-md-4">
+                        <div class="border rounded p-3 h-100" id="costDrillDiffBox">
+                            <div class="small text-secondary">차이 (집행−표준)</div>
+                            <div class="fs-5 fw-semibold font-monospace" id="costDrillDiff">0</div>
+                        </div>
+                    </div>
+                </div>
+                <h3 class="h6 border-bottom pb-2 mb-2">상세 분석 리포트</h3>
+                <div class="bg-body-secondary rounded p-3 small" id="costDrillReport" style="white-space: pre-wrap;"></div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">닫기</button>
+            </div>
+        </div>
+    </div>
+</div>
+
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"
         integrity="sha384-YvpcrYf0tY3lHB60NNkmXc5s9fDVZLESaAA55NDzOxhy9GkcIdslK1eN7N6jIeHz"
         crossorigin="anonymous"></script>
-<!--/*
-  클라이언트 사이드 필터링(비동기 아님)
-  - 서버에 다시 요청하지 않고, DOM에서 행(tr)을 숨김/표시만 바꿉니다.
-  - Bootstrap의 d-none(display:none) 클래스를 토글합니다.
-
-  IIFE: (function(){ ... })();
-  - 전역 스코프 오염을 줄이기 위해 즉시 실행 함수로 감쌌습니다.
-*/-->
-<script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js" crossorigin="anonymous"></script>
+<script th:inline="javascript">
+    /*<![CDATA[*/
     (function () {
-        var select = document.getElementById('departmentFilter');
-        // data-dept 속성이 있는 행만 대상으로 삼습니다(헤더 행 제외 효과).
-        var rows = document.querySelectorAll('#costTable tbody tr[data-dept]');
+        // 서버에서 계산한 차트 축 라벨·소진율(%) — Thymeleaf가 리터럴로 직렬화합니다.
+        var chartLabels = /*[[${chartDeptLabels}]]*/ ['A본부', 'B본부', 'C본부', 'D본부', 'E본부'];
+        var chartData = /*[[${chartDeptBurnRates}]]*/ [0, 0, 0, 0, 0];
 
-        select.addEventListener('change', function () {
-            var value = select.value;
-            rows.forEach(function (tr) {
-                var dept = tr.getAttribute('data-dept');
-                // 전체(ALL)이거나, 선택한 본부명과 일치하면 표시, 아니면 숨김
-                if (value === 'ALL' || dept === value) {
-                    tr.classList.remove('d-none');
-                } else {
-                    tr.classList.add('d-none');
+        var yAxisMax = (function () {
+            var m = Math.max.apply(null, chartData.concat([100]));
+            return Math.min(160, Math.ceil(m / 10) * 10 + 10);
+        })();
+
+        var ctx = document.getElementById('deptBurnChart');
+        if (ctx && typeof Chart !== 'undefined') {
+            new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: chartLabels,
+                    datasets: [{
+                        label: '예산 소진율 (%)',
+                        data: chartData,
+                        backgroundColor: [
+                            'rgba(13, 110, 253, 0.55)',
+                            'rgba(25, 135, 84, 0.5)',
+                            'rgba(111, 66, 193, 0.5)',
+                            'rgba(253, 126, 20, 0.55)',
+                            'rgba(220, 53, 69, 0.45)'
+                        ],
+                        borderColor: 'rgba(0,0,0,0.06)',
+                        borderWidth: 1,
+                        borderRadius: 4
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: {
+                            callbacks: {
+                                label: function (ctx) {
+                                    return ' 소진율: ' + ctx.raw + '%';
+                                }
+                            }
+                        }
+                    },
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            title: { display: true, text: '소진율 (%)' },
+                            suggestedMax: yAxisMax
+                        },
+                        x: { grid: { display: false } }
+                    }
                 }
+            });
+        }
+
+        var select = document.getElementById('departmentFilter');
+        var tbody = document.getElementById('costTableBody');
+        var rows = function () {
+            return tbody.querySelectorAll('tr[data-dept]');
+        };
+
+        function applyDeptFilter() {
+            var value = select.value;
+            rows().forEach(function (tr) {
+                var dept = tr.getAttribute('data-dept');
+                tr.classList.toggle('d-none', value !== 'ALL' && dept !== value);
+            });
+        }
+
+        select.addEventListener('change', applyDeptFilter);
+
+        var sortState = { key: 'project', dir: 'asc' };
+
+        function clearSortIndicators() {
+            document.querySelectorAll('#costTable thead .sort-ind').forEach(function (el) { el.textContent = ''; });
+        }
+
+        function updateSortIndicator() {
+            clearSortIndicators();
+            var th = document.querySelector('#costTable thead [data-sort="' + sortState.key + '"]');
+            if (!th) return;
+            var ind = th.querySelector('.sort-ind');
+            if (ind) ind.textContent = sortState.dir === 'asc' ? '▲' : '▼';
+        }
+
+        function cellVal(tr, key) {
+            if (key === 'dept') return tr.getAttribute('data-dept') || '';
+            if (key === 'project') return tr.getAttribute('data-project') || '';
+            if (key === 'standard') return parseFloat(tr.getAttribute('data-standard')) || 0;
+            if (key === 'current') return parseFloat(tr.getAttribute('data-current')) || 0;
+            if (key === 'diff') return parseFloat(tr.getAttribute('data-diff')) || 0;
+            if (key === 'status') return tr.getAttribute('data-status') || '';
+            return '';
+        }
+
+        function sortRows(key, type) {
+            var list = Array.from(rows()).filter(function (tr) { return !tr.classList.contains('d-none'); });
+            var all = Array.from(rows());
+            if (sortState.key === key) {
+                sortState.dir = sortState.dir === 'asc' ? 'desc' : 'asc';
+            } else {
+                sortState.key = key;
+                sortState.dir = type === 'string' ? 'asc' : 'desc';
+            }
+            var mul = sortState.dir === 'asc' ? 1 : -1;
+            list.sort(function (a, b) {
+                var va = cellVal(a, key);
+                var vb = cellVal(b, key);
+                if (type === 'number') return (va - vb) * mul;
+                return String(va).localeCompare(String(vb), 'ko') * mul;
+            });
+            list.forEach(function (tr) { tbody.appendChild(tr); });
+            all.filter(function (tr) { return tr.classList.contains('d-none'); })
+                .forEach(function (tr) { tbody.appendChild(tr); });
+            updateSortIndicator();
+        }
+
+        document.querySelectorAll('#costTable thead [data-sort]').forEach(function (th) {
+            th.addEventListener('click', function () {
+                sortRows(th.getAttribute('data-sort'), th.getAttribute('data-type') || 'string');
+            });
+        });
+        updateSortIndicator();
+
+        function formatWon(n) {
+            return Number(n).toLocaleString('ko-KR') + '원';
+        }
+
+        var drillModalEl = document.getElementById('costDrillModal');
+        var drillModal = drillModalEl ? new bootstrap.Modal(drillModalEl) : null;
+
+        document.querySelectorAll('.cost-drill-btn').forEach(function (btn) {
+            btn.addEventListener('click', function () {
+                var dept = btn.getAttribute('data-dept') || '';
+                var project = btn.getAttribute('data-project') || '';
+                var std = parseFloat(btn.getAttribute('data-standard')) || 0;
+                var cur = parseFloat(btn.getAttribute('data-current')) || 0;
+                var st = btn.getAttribute('data-status') || '';
+                var reason = btn.getAttribute('data-reason') || '';
+                var diff = cur - std;
+
+                document.getElementById('costDrillSubtitle').textContent =
+                    '[' + dept + '] · ' + project + ' · 상태: ' + st;
+                document.getElementById('costDrillStandard').textContent = formatWon(std);
+                document.getElementById('costDrillCurrent').textContent = formatWon(cur);
+                var diffEl = document.getElementById('costDrillDiff');
+                diffEl.textContent = formatWon(diff);
+                diffEl.classList.remove('text-danger', 'text-success');
+                var diffBox = document.getElementById('costDrillDiffBox');
+                diffBox.classList.remove('bg-danger', 'bg-success', 'bg-opacity-10', 'bg-body-secondary');
+                diffBox.classList.add('border', 'rounded', 'p-3', 'h-100');
+                if (diff > 0) {
+                    diffBox.classList.add('bg-danger', 'bg-opacity-10');
+                    diffEl.classList.add('text-danger');
+                } else if (diff < 0) {
+                    diffBox.classList.add('bg-success', 'bg-opacity-10');
+                    diffEl.classList.add('text-success');
+                } else {
+                    diffBox.classList.add('bg-body-secondary');
+                }
+
+                var report =
+                    '【요약】\n' +
+                    '· 표준 원가(내부 예산/베이스라인): ' + formatWon(std) + '\n' +
+                    '· 집행 원가(실제 투입): ' + formatWon(cur) + '\n' +
+                    '· 차이: ' + formatWon(diff) + ' (' + (diff > 0 ? '초과 집행' : (diff < 0 ? '예산 대비 여유' : '일치')) + ')\n\n' +
+                    '【관리회계 코멘터리】\n' +
+                    reason + '\n\n' +
+                    '【권고 액션(샘플)】\n' +
+                    (st === '초과'
+                        ? '· 차기 월 롤링 예산 재산정 또는 비용요소 재배분 검토\n· WBS 기준 실적 추적 회의 소질'
+                        : '· 현 수준 유지 및 분기별 벤치마크 점검');
+                document.getElementById('costDrillReport').textContent = report;
+                if (drillModal) drillModal.show();
             });
         });
     })();
+    /*]]>*/
 </script>
 </body>
 </html>

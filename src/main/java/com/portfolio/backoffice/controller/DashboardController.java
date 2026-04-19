@@ -7,6 +7,7 @@ import com.portfolio.backoffice.dto.NewInterfaceRequest;
 import com.portfolio.backoffice.repository.InterfaceHistoryRepository;
 import com.portfolio.backoffice.repository.ProjectCostRepository;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -48,6 +49,13 @@ public class DashboardController {
     /** [SM 실무] 운영 콘솔에서 허용하는 프로토콜 값을 화이트리스트로 고정하면 오타·보안 사고(잘못된 스킴 입력)를 예방합니다. */
     private static final Set<String> ALLOWED_PROTOCOLS =
             Set.of("REST", "SOAP", "MQ", "Batch", "SFTP");
+
+    /**
+     * [관리회계] 차트 X축(본부) 순서를 조직도·경영 보고서와 동일하게 고정합니다.
+     * 임의 정렬이면 임원진이 슬라이드 간 비교 시 혼선을 겪습니다.
+     */
+    private static final List<String> COST_CHART_DEPARTMENT_ORDER =
+            List.of("A본부", "B본부", "C본부", "D본부", "E본부");
 
     private final InterfaceHistoryRepository interfaceHistoryRepository;
     private final ProjectCostRepository projectCostRepository;
@@ -103,9 +111,14 @@ public class DashboardController {
     /**
      * 원가(프로젝트 비용) 모니터링 화면({@code cost.html})을 보여 줍니다.
      *
-     * <p><b>집계 로직</b><br>
-     * 표준 원가(예산) 합, 집행 원가 합, 잔여 예산(예산−집행)은 화면에서 for문 돌려도 되지만,
-     * 여기서는 컨트롤러에서 한 번에 계산해 Model에 넣어 “뷰는 표현에만 집중”하게 했습니다.
+     * <p><b>집계 로직 (KPI)</b><br>
+     * 표준 원가(예산) 합, 집행 원가 합, 잔여 예산(예산−집행)은 전사 관점의 요약 지표입니다.
+     * 경영진이 “한 장의 숫자”로 재무 건전성을 판단할 수 있게 서버에서 미리 합산합니다.
+     *
+     * <p><b>본부별 예산 소진율(차트용)</b><br>
+     * [관리회계] 부서별 {@code Σ집행 / Σ표준 × 100}은 “예산 대비 소진 속도”를 나타내는 대표 지표입니다.
+     * 100% 초과 시 초과 집행(또는 표준 산정과의 시차)을 의미하며, Chart.js에는 소수 첫째 자리까지 반올림해 전달합니다.
+     * (실무에서는 회계 마감·인식 기준에 따라 분모를 ‘연간 예산’으로 바꾸기도 합니다.)
      */
     @GetMapping("/cost")
     public String costPage(Model model) {
@@ -115,10 +128,28 @@ public class DashboardController {
         long totalSpent = costs.stream().mapToLong(ProjectCost::getCurrentCost).sum();
         long remainingBudget = totalBudget - totalSpent;
 
+        List<Double> deptBurnRates = new ArrayList<>(COST_CHART_DEPARTMENT_ORDER.size());
+        for (String dept : COST_CHART_DEPARTMENT_ORDER) {
+            long sumStandard =
+                    costs.stream()
+                            .filter(c -> dept.equals(c.getDepartmentName()))
+                            .mapToLong(ProjectCost::getStandardCost)
+                            .sum();
+            long sumCurrent =
+                    costs.stream()
+                            .filter(c -> dept.equals(c.getDepartmentName()))
+                            .mapToLong(ProjectCost::getCurrentCost)
+                            .sum();
+            double pct = sumStandard > 0 ? (100.0 * sumCurrent / sumStandard) : 0.0;
+            deptBurnRates.add(Math.round(pct * 10.0) / 10.0);
+        }
+
         model.addAttribute("costs", costs);
         model.addAttribute("totalBudget", totalBudget);
         model.addAttribute("totalSpent", totalSpent);
         model.addAttribute("remainingBudget", remainingBudget);
+        model.addAttribute("chartDeptLabels", COST_CHART_DEPARTMENT_ORDER);
+        model.addAttribute("chartDeptBurnRates", deptBurnRates);
         model.addAttribute("activeMenu", "cost");
         return "cost";
     }

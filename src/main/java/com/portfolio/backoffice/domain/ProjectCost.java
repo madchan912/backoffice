@@ -56,4 +56,15 @@ public class ProjectCost {
      */
     @Column(nullable = false, length = 16)
     private String status;
+
+    /**
+     * 원가 초과 또는 절감·정상 집행에 대한 <b>관리회계 관점의 사유 텍스트</b>입니다.
+     *
+     * <p>[금융권 관리회계 실무]<br>
+     * 경영진·재무통제(Finance Control)는 숫자만으로는 의사결정을 하지 않습니다. “왜 초과했는가”가 없으면
+     * 예산 재배정·책임 소재·내부통제(ICS) 대응이 불가능합니다. 본 필드는 CO(Cost Object) 단위 코멘터리에 해당하며,
+     * 실제로는 워크플로 승인 시 입력되지만 본 포트폴리오에서는 시드 데이터로 시뮬레이션합니다.
+     */
+    @Column(name = "cost_reason", nullable = false, length = 256)
+    private String costReason;
 }
